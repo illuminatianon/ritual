@@ -11,6 +11,7 @@ export interface SongState {
   dirty: boolean;
   diffTargetVersionId: number | null;
   view: EditorView | null;
+  resetEditorDocument: ((lyrics: string) => void) | null;
   activity: number;
 }
 
@@ -22,6 +23,7 @@ function emptyState(songId: number): SongState {
     dirty: false,
     diffTargetVersionId: null,
     view: null,
+    resetEditorDocument: null,
     activity: 0,
   };
 }
@@ -65,9 +67,10 @@ export const useSongStore = defineStore('song', {
         this.replaceEditorText(songId, '');
       }
     },
-    registerView(songId: number, view: EditorView) {
+    registerView(songId: number, view: EditorView, resetEditorDocument: (lyrics: string) => void) {
       const state = this.ensure(songId);
       state.view = view;
+      state.resetEditorDocument = resetEditorDocument;
       const loaded = state.versions.find((version) => version.id === state.loadedVersionId);
       if (loaded) {
         this.replaceEditorText(songId, loaded.lyrics);
@@ -75,16 +78,17 @@ export const useSongStore = defineStore('song', {
       state.dirty = false;
     },
     unregisterView(songId: number) {
-      this.ensure(songId).view = null;
+      const state = this.ensure(songId);
+      state.view = null;
+      state.resetEditorDocument = null;
     },
     replaceEditorText(songId: number, lyrics: string) {
-      const view = this.ensure(songId).view;
+      const state = this.ensure(songId);
+      const view = state.view;
       if (!view) {
         return;
       }
-      view.dispatch({
-        changes: { from: 0, to: view.state.doc.length, insert: lyrics },
-      });
+      state.resetEditorDocument?.(lyrics);
     },
     getCurrentText(songId: number): string {
       return this.ensure(songId).view?.state.doc.toString() ?? '';

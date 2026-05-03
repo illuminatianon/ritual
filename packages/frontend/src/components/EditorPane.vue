@@ -15,6 +15,17 @@ const songStore = useSongStore();
 const editorRoot = ref<HTMLDivElement | null>(null);
 let editorView: EditorView | null = null;
 
+function createEditorState(doc: string) {
+  return EditorState.create({
+    doc,
+    extensions: createLyricsExtensions({
+      showWordAnnotations: props.showWordAnnotations,
+      onDirty: (dirty) => songStore.markDirty(props.songId, dirty),
+      onActivity: () => songStore.markActivity(props.songId),
+    }),
+  });
+}
+
 onMounted(() => {
   if (!editorRoot.value) {
     return;
@@ -22,17 +33,12 @@ onMounted(() => {
 
   editorView = new EditorView({
     parent: editorRoot.value,
-    state: EditorState.create({
-      doc: props.initialDocument,
-      extensions: createLyricsExtensions({
-        showWordAnnotations: props.showWordAnnotations,
-        onDirty: (dirty) => songStore.markDirty(props.songId, dirty),
-        onActivity: () => songStore.markActivity(props.songId),
-      }),
-    }),
+    state: createEditorState(props.initialDocument),
   });
 
-  songStore.registerView(props.songId, editorView);
+  songStore.registerView(props.songId, editorView, (lyrics) => {
+    editorView?.setState(createEditorState(lyrics));
+  });
 });
 
 watch(
