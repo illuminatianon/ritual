@@ -5,6 +5,7 @@ import EditorPane from './components/EditorPane.vue';
 import Sidebar from './components/Sidebar.vue';
 import StatusBar from './components/StatusBar.vue';
 import Toolbar from './components/Toolbar.vue';
+import type { Version } from '@ritual/backend/api';
 import { usePrefsStore } from './stores/prefs';
 import { useSongStore } from './stores/song';
 import { useSongsStore } from './stores/songs';
@@ -37,6 +38,8 @@ type DialogState =
 
 const dialog = ref<DialogState | null>(null);
 const dialogInput = ref('');
+const notice = ref<string | null>(null);
+let noticeTimeout: number | null = null;
 
 onMounted(async () => {
   await songsStore.loadAll();
@@ -48,6 +51,9 @@ onMounted(async () => {
 
 onBeforeUnmount(() => {
   window.removeEventListener('keydown', handleShortcuts);
+  if (noticeTimeout != null) {
+    window.clearTimeout(noticeTimeout);
+  }
 });
 
 watch(
@@ -99,17 +105,22 @@ async function archiveSong() {
   }
 }
 
-async function saveNewVersion() {
+async function saveNewVersion(): Promise<Version | null> {
   if (!activeState.value) {
-    return;
+    return null;
   }
-  const label = (await askText({
+  const label = await askText({
     title: 'Save new version',
     message: 'Add an optional label for this snapshot.',
     value: '',
     placeholder: 'tightened chorus',
-  })) ?? undefined;
-  await songStore.saveBumpVersion(activeState.value.songId, label);
+  });
+  if (label == null) {
+    return null;
+  }
+  const version = await songStore.saveBumpVersion(activeState.value.songId, label || undefined);
+  showNotice(`Saved v${version.version_number}`);
+  return version;
 }
 
 async function overwriteVersion() {
@@ -126,6 +137,7 @@ async function overwriteVersion() {
   }
 
   await songStore.overwriteCurrentVersion(activeState.value.songId);
+  showNotice('Version updated');
 }
 
 async function loadVersion(versionId: number) {
@@ -142,6 +154,7 @@ async function deleteVersion(versionId: number) {
     return;
   }
   await songStore.deleteVersion(activeState.value.songId, versionId);
+  showNotice('Version deleted');
 }
 
 async function restoreSong(songId: number) {
@@ -162,6 +175,9 @@ async function copyLyrics() {
   const text = currentLyrics();
   if (text) {
     await navigator.clipboard.writeText(text);
+    showNotice('Lyrics copied');
+  } else {
+    showNotice('Nothing to copy');
   }
 }
 
@@ -184,8 +200,7 @@ async function confirmDirtyTransition() {
     ],
   });
   if (answer === 'save') {
-    await saveNewVersion();
-    return true;
+    return (await saveNewVersion()) != null;
   }
   return answer === 'discard';
 }
@@ -268,6 +283,17 @@ function cancelDialog() {
   dialog.value?.resolve(null);
   dialog.value = null;
 }
+
+function showNotice(message: string) {
+  notice.value = message;
+  if (noticeTimeout != null) {
+    window.clearTimeout(noticeTimeout);
+  }
+  noticeTimeout = window.setTimeout(() => {
+    notice.value = null;
+    noticeTimeout = null;
+  }, 2200);
+}
 </script>
 
 <template>
@@ -325,6 +351,8 @@ function cancelDialog() {
     </section>
 
     <DiffPanel :active="activeState" @load-version="loadVersion" @delete-version="deleteVersion" />
+
+    <div v-if="notice" class="toast" role="status">{{ notice }}</div>
 
     <div v-if="dialog" class="dialog-backdrop" @click.self="cancelDialog">
       <form v-if="dialog.kind === 'text'" class="dialog" @submit.prevent="submitDialog">
