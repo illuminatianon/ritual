@@ -58,7 +58,7 @@ export const useSongStore = defineStore('song', {
       state.versions = await api.versions.list(songId);
       const head = state.versions.at(-1) ?? null;
       state.loadedVersionId = head?.id ?? null;
-      state.diffTargetVersionId = state.versions.length > 1 ? state.versions[state.versions.length - 2].id : null;
+      state.diffTargetVersionId = head?.id ?? null;
       state.dirty = false;
 
       if (head && state.view) {
@@ -105,14 +105,14 @@ export const useSongStore = defineStore('song', {
       this.replaceEditorText(songId, version.lyrics);
       state.loadedVersionId = version.id;
       state.dirty = false;
-      state.diffTargetVersionId = pickPreviousVersionId(state.versions, version.id);
+      state.diffTargetVersionId = pickLatestVersionId(state.versions);
     },
     async saveBumpVersion(songId: number, label?: string) {
       const state = this.ensure(songId);
       const version = await api.versions.save({ songId, lyrics: this.getCurrentText(songId), label });
       state.versions.push(version);
       state.loadedVersionId = version.id;
-      state.diffTargetVersionId = pickPreviousVersionId(state.versions, version.id);
+      state.diffTargetVersionId = version.id;
       state.dirty = false;
       return version;
     },
@@ -126,6 +126,7 @@ export const useSongStore = defineStore('song', {
         lyrics: this.getCurrentText(songId),
       });
       state.versions = state.versions.map((item) => (item.id === version.id ? version : item));
+      state.diffTargetVersionId = version.id;
       state.dirty = false;
       return version;
     },
@@ -139,9 +140,7 @@ export const useSongStore = defineStore('song', {
         this.replaceEditorText(songId, head?.lyrics ?? '');
         state.dirty = false;
       }
-      state.diffTargetVersionId = state.loadedVersionId
-        ? pickPreviousVersionId(state.versions, state.loadedVersionId)
-        : null;
+      state.diffTargetVersionId = pickLatestVersionId(state.versions);
     },
     setDiffTarget(songId: number, versionId: number | null) {
       this.ensure(songId).diffTargetVersionId = versionId;
@@ -149,7 +148,6 @@ export const useSongStore = defineStore('song', {
   },
 });
 
-function pickPreviousVersionId(versions: Version[], loadedVersionId: number): number | null {
-  const index = versions.findIndex((version) => version.id === loadedVersionId);
-  return index > 0 ? versions[index - 1].id : null;
+function pickLatestVersionId(versions: Version[]): number | null {
+  return versions.at(-1)?.id ?? null;
 }

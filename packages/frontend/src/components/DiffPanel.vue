@@ -14,15 +14,34 @@ const emit = defineEmits<{
 
 const songStore = useSongStore();
 const rows = ref<DiffRow[]>([]);
+const pickerOpen = ref(false);
 let intervalId: number | null = null;
 let lastActivityAt = 0;
 
+const versionsNewestFirst = computed(() => [...(props.active?.versions ?? [])].reverse());
+
 const targetVersion = computed(() => {
   if (!props.active?.diffTargetVersionId) {
-    return null;
+    return versionsNewestFirst.value[0] ?? null;
   }
-  return props.active.versions.find((version) => version.id === props.active?.diffTargetVersionId) ?? null;
+  return (
+    props.active.versions.find((version) => version.id === props.active?.diffTargetVersionId) ??
+    versionsNewestFirst.value[0] ??
+    null
+  );
 });
+
+const menuVersions = computed(() =>
+  versionsNewestFirst.value.filter((version) => version.id !== targetVersion.value?.id),
+);
+
+function versionTitle(version: { version_number: number; label: string | null }) {
+  return `v${version.version_number}${version.label ? `: ${version.label}` : ''}`;
+}
+
+function versionDate(version: { updated_at: string; created_at: string }) {
+  return new Date(version.updated_at || version.created_at).toLocaleString();
+}
 
 function recompute() {
   if (!props.active || !targetVersion.value) {
@@ -31,6 +50,14 @@ function recompute() {
   }
 
   rows.value = computeLyricsDiff(targetVersion.value.lyrics, songStore.getCurrentText(props.active.songId));
+}
+
+function selectBaseline(versionId: number) {
+  if (!props.active) {
+    return;
+  }
+  songStore.setDiffTarget(props.active.songId, versionId);
+  pickerOpen.value = false;
 }
 
 function onActivity() {
@@ -50,7 +77,10 @@ function onActivity() {
 
 watch(
   () => [props.active?.songId, props.active?.diffTargetVersionId, props.active?.loadedVersionId],
-  () => recompute(),
+  () => {
+    pickerOpen.value = false;
+    recompute();
+  },
   { immediate: true },
 );
 
@@ -68,40 +98,31 @@ onBeforeUnmount(() => {
 
 <template>
   <aside class="diff-panel">
-    <div class="panel-head">
-      <div>
-        <p class="eyebrow">Diff</p>
-        <h2>Against previous</h2>
-      </div>
-      <select
-        v-if="active && active.versions.length > 0"
-        :value="active.diffTargetVersionId ?? ''"
-        @change="songStore.setDiffTarget(active.songId, Number(($event.target as HTMLSelectElement).value) || null)"
-      >
-        <option value="">No target</option>
-        <option v-for="version in active.versions" :key="version.id" :value="version.id">
-          v{{ version.version_number }}{{ version.label ? `: ${version.label}` : '' }}
-        </option>
-      </select>
-    </div>
-
-    <div v-if="active" class="version-list">
-      <button
-        v-for="version in active.versions"
-        :key="version.id"
-        type="button"
-        class="version-row"
-        :class="{ active: version.id === active.loadedVersionId }"
-        @click="emit('loadVersion', version.id)"
-      >
-        <span>v{{ version.version_number }}</span>
-        <small>{{ version.label || new Date(version.created_at).toLocaleString() }}</small>
+    <div v-if="active && targetVersion" class="baseline-picker">
+      <button class="baseline-selected" type="button" @click="pickerOpen = !pickerOpen">
+        <span>{{ versionTitle(targetVersion) }}</span>
+        <span class="baseline-caret">v</span>
+        <small>{{ versionDate(targetVersion) }}</small>
       </button>
+
+      <div v-if="pickerOpen" class="baseline-menu">
+        <button
+          v-for="version in menuVersions"
+          :key="version.id"
+          type="button"
+          class="baseline-option"
+          @click="selectBaseline(version.id)"
+        >
+          <span>{{ versionTitle(version) }}</span>
+          <small>{{ versionDate(version) }}</small>
+        </button>
+        <p v-if="menuVersions.length === 0" class="empty-note">No earlier versions.</p>
+      </div>
     </div>
 
     <div class="diff-output">
       <p v-if="!active" class="empty-note">Create or select a song to begin.</p>
-      <p v-else-if="!targetVersion" class="empty-note">Save another version to compare changes.</p>
+      <p v-else-if="!targetVersion" class="empty-note">Save a version to compare changes.</p>
       <pre v-else-if="rows.length === 0" class="empty-note">No changes.</pre>
       <pre v-for="row in rows" v-else :key="row.id" class="diff-row" :class="row.type"><template
         v-for="(part, index) in row.parts"

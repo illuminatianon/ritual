@@ -30,7 +30,7 @@
 ## workflow
 
 - [ ] new song flow: default to "Untitled Song", no popup to collect name. move that to first save
-- [ ] dirty check when creating a new song/restoring is possibly broken. getting unsaved changes popup even if the buffer is new
+- [x] dirty check when creating a new song/restoring is possibly broken. getting unsaved changes popup even if the buffer is new
   - steps were:
     1. Delete test song, this loaded the previous song into editor
     2. Restore test song, get "Unsaved changes popup"
@@ -40,4 +40,4 @@
 
 ## diffing
 
-- [ ] The diff panel should compare the current editor buffer against the version selected in the dropdown. The “Against previous” label can be removed because the dropdown itself defines the baseline. The dropdown should default to the previous version of the current editor state, and after saving a new version it should update to that new previous version. Right now it appears to stay pointed at the old baseline after save, so the diff panel continues showing the old v2-v1 diff instead of the current buffer’s changes against the latest saved baseline.
+- [x] The diff panel should compare the current editor buffer against the version selected in the dropdown. The “Against previous” label can be removed because the dropdown itself defines the baseline. The dropdown should default to the previous version of the current editor state, and after saving a new version it should update to that new previous version. Right now it appears to stay pointed at the old baseline after save, so the diff panel continues showing the old v2-v1 diff instead of the current buffer’s changes against the latest saved baseline.
