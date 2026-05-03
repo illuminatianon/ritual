@@ -11,7 +11,6 @@
     "preview": "vite preview --host 127.0.0.1",
     "electron:dev": "vite --host 127.0.0.1",
     "electron:build": "pnpm build && electron-builder",
-    "rebuild:native": "electron-rebuild -f -w better-sqlite3",
     "test": "TMPDIR=/tmp vitest run"
   },
   "keywords": [],

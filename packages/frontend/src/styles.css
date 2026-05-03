@@ -28,7 +28,8 @@ input {
 }
 
 button,
-select {
+select,
+input {
   border: 1px solid #383a40;
   border-radius: 6px;
   background: #1b1d22;
@@ -343,4 +344,42 @@ small,
 
 .empty-note {
   margin: 16px;
+}
+
+.dialog-backdrop {
+  position: fixed;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  padding: 24px;
+  background: rgba(7, 8, 10, 0.68);
+  z-index: 20;
+}
+
+.dialog {
+  display: grid;
+  gap: 18px;
+  width: min(420px, 100%);
+  border: 1px solid #34373d;
+  border-radius: 8px;
+  padding: 20px;
+  background: #17191d;
+  box-shadow: 0 24px 70px rgba(0, 0, 0, 0.42);
+}
+
+.dialog-message {
+  margin: 8px 0 0;
+  color: #bdb7ad;
+  line-height: 1.5;
+}
+
+.dialog input {
+  width: 100%;
+  min-height: 38px;
+}
+
+.dialog-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
 }

@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onBeforeUnmount, onMounted, watch } from 'vue';
+import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue';
 import DiffPanel from './components/DiffPanel.vue';
 import EditorPane from './components/EditorPane.vue';
 import Sidebar from './components/Sidebar.vue';
@@ -17,6 +17,26 @@ const activeSong = computed(() => songsStore.activeSong);
 const activeState = computed(() => songStore.active);
 const activeVersion = computed(() => songStore.activeVersion);
 const initialDocument = computed(() => activeVersion.value?.lyrics ?? '');
+
+type DialogState =
+  | {
+      kind: 'text';
+      title: string;
+      message?: string;
+      value: string;
+      placeholder?: string;
+      resolve: (value: string | null) => void;
+    }
+  | {
+      kind: 'choice';
+      title: string;
+      message?: string;
+      choices: Array<{ label: string; value: string; tone?: 'primary' | 'danger' }>;
+      resolve: (value: string | null) => void;
+    };
+
+const dialog = ref<DialogState | null>(null);
+const dialogInput = ref('');
 
 onMounted(async () => {
   await songsStore.loadAll();
@@ -43,7 +63,7 @@ async function createSong() {
   if (!(await confirmDirtyTransition())) {
     return;
   }
-  const name = window.prompt('Song name', 'Untitled song');
+  const name = await askText({ title: 'New song', value: 'Untitled song' });
   if (name == null) {
     return;
   }
@@ -64,7 +84,7 @@ async function renameSong() {
   if (!activeSong.value) {
     return;
   }
-  const name = window.prompt('Rename song', activeSong.value.name);
+  const name = await askText({ title: 'Rename song', value: activeSong.value.name });
   if (name != null) {
     await songsStore.rename(activeSong.value.id, name);
   }
@@ -74,7 +94,7 @@ async function archiveSong() {
   if (!activeSong.value || !(await confirmDirtyTransition())) {
     return;
   }
-  if (window.confirm(`Archive "${activeSong.value.name}"?`)) {
+  if (await askConfirm(`Archive "${activeSong.value.name}"?`, 'Archived songs can be restored later.')) {
     await songsStore.archive(activeSong.value.id);
   }
 }
@@ -83,7 +103,12 @@ async function saveNewVersion() {
   if (!activeState.value) {
     return;
   }
-  const label = window.prompt('Optional version label', '') ?? undefined;
+  const label = (await askText({
+    title: 'Save new version',
+    message: 'Add an optional label for this snapshot.',
+    value: '',
+    placeholder: 'tightened chorus',
+  })) ?? undefined;
   await songStore.saveBumpVersion(activeState.value.songId, label);
 }
 
@@ -95,7 +120,7 @@ async function overwriteVersion() {
   const headId = activeState.value.versions.at(-1)?.id ?? null;
   if (activeState.value.loadedVersionId && activeState.value.loadedVersionId !== headId) {
     const loaded = activeState.value.versions.find((version) => version.id === activeState.value?.loadedVersionId);
-    if (!window.confirm(`Overwrite v${loaded?.version_number}? This rewrites history.`)) {
+    if (!(await askConfirm(`Overwrite v${loaded?.version_number}?`, 'This rewrites history for the loaded version.'))) {
       return;
     }
   }
@@ -113,7 +138,7 @@ async function loadVersion(versionId: number) {
 }
 
 async function deleteVersion(versionId: number) {
-  if (!activeState.value || !window.confirm('Delete the loaded version?')) {
+  if (!activeState.value || !(await askConfirm('Delete the loaded version?', 'This removes the snapshot from history.'))) {
     return;
   }
   await songStore.deleteVersion(activeState.value.songId, versionId);
@@ -128,7 +153,7 @@ async function restoreSong(songId: number) {
 }
 
 async function deletePermanent(songId: number) {
-  if (window.confirm('Permanently delete this archived song and all versions?')) {
+  if (await askConfirm('Permanently delete this archived song?', 'All versions for this song will be deleted.')) {
     await songsStore.deletePermanent(songId);
   }
 }
@@ -149,7 +174,15 @@ async function confirmDirtyTransition() {
     return true;
   }
 
-  const answer = window.prompt('Unsaved changes: type "save", "discard", or "cancel".', 'save');
+  const answer = await askChoice({
+    title: 'Unsaved changes',
+    message: 'Save a new version before leaving this song?',
+    choices: [
+      { label: 'Save', value: 'save', tone: 'primary' },
+      { label: 'Discard', value: 'discard', tone: 'danger' },
+      { label: 'Cancel', value: 'cancel' },
+    ],
+  });
   if (answer === 'save') {
     await saveNewVersion();
     return true;
@@ -169,6 +202,71 @@ function handleShortcuts(event: KeyboardEvent) {
   } else if (!event.altKey) {
     void saveNewVersion();
   }
+}
+
+function askText(args: { title: string; message?: string; value: string; placeholder?: string }) {
+  dialogInput.value = args.value;
+  return new Promise<string | null>((resolve) => {
+    dialog.value = {
+      kind: 'text',
+      title: args.title,
+      message: args.message,
+      value: args.value,
+      placeholder: args.placeholder,
+      resolve,
+    };
+  });
+}
+
+function askChoice(args: {
+  title: string;
+  message?: string;
+  choices: Array<{ label: string; value: string; tone?: 'primary' | 'danger' }>;
+}) {
+  return new Promise<string | null>((resolve) => {
+    dialog.value = {
+      kind: 'choice',
+      title: args.title,
+      message: args.message,
+      choices: args.choices,
+      resolve,
+    };
+  });
+}
+
+async function askConfirm(title: string, message?: string) {
+  const answer = await askChoice({
+    title,
+    message,
+    choices: [
+      { label: 'Confirm', value: 'confirm', tone: 'primary' },
+      { label: 'Cancel', value: 'cancel' },
+    ],
+  });
+  return answer === 'confirm';
+}
+
+function submitDialog() {
+  if (!dialog.value) {
+    return;
+  }
+
+  if (dialog.value.kind === 'text') {
+    dialog.value.resolve(dialogInput.value);
+  }
+  dialog.value = null;
+}
+
+function chooseDialog(value: string) {
+  if (dialog.value?.kind === 'choice') {
+    dialog.value.resolve(value);
+    dialog.value = null;
+  }
+}
+
+function cancelDialog() {
+  dialog.value?.resolve(null);
+  dialog.value = null;
 }
 </script>
 
@@ -227,5 +325,39 @@ function handleShortcuts(event: KeyboardEvent) {
     </section>
 
     <DiffPanel :active="activeState" @load-version="loadVersion" @delete-version="deleteVersion" />
+
+    <div v-if="dialog" class="dialog-backdrop" @click.self="cancelDialog">
+      <form v-if="dialog.kind === 'text'" class="dialog" @submit.prevent="submitDialog">
+        <div>
+          <p class="eyebrow">Ritual</p>
+          <h2>{{ dialog.title }}</h2>
+          <p v-if="dialog.message" class="dialog-message">{{ dialog.message }}</p>
+        </div>
+        <input v-model="dialogInput" :placeholder="dialog.placeholder" autofocus />
+        <div class="dialog-actions">
+          <button type="button" @click="cancelDialog">Cancel</button>
+          <button type="submit" class="primary-action">OK</button>
+        </div>
+      </form>
+
+      <div v-else class="dialog" role="dialog" aria-modal="true">
+        <div>
+          <p class="eyebrow">Ritual</p>
+          <h2>{{ dialog.title }}</h2>
+          <p v-if="dialog.message" class="dialog-message">{{ dialog.message }}</p>
+        </div>
+        <div class="dialog-actions">
+          <button
+            v-for="choice in dialog.choices"
+            :key="choice.value"
+            type="button"
+            :class="{ 'primary-action': choice.tone === 'primary', danger: choice.tone === 'danger' }"
+            @click="chooseDialog(choice.value)"
+          >
+            {{ choice.label }}
+          </button>
+        </div>
+      </div>
+    </div>
   </main>
 </template>
