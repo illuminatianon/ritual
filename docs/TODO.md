@@ -8,13 +8,13 @@
 
 ### statusbar
 
-- [ ] move version & dirty indicator into the header.
-- [ ] remove song title from status bar
+- [x] move version & dirty indicator into the header.
+- [x] remove song title from status bar
 
 ### editor header
 
-- [ ] remove text: "EDITOR"
-- [ ] put version & dirty indicator under title
+- [x] remove text: "EDITOR"
+- [x] put version & dirty indicator under title
 
 ### library panel
 

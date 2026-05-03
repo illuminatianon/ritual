@@ -18,6 +18,20 @@ const activeSong = computed(() => songsStore.activeSong);
 const activeState = computed(() => songStore.active);
 const activeVersion = computed(() => songStore.activeVersion);
 const initialDocument = computed(() => activeVersion.value?.lyrics ?? '');
+const editorVersionLabel = computed(() => {
+  if (!activeState.value) {
+    return 'No version loaded';
+  }
+
+  const version = activeVersion.value;
+  const base = version ? `v${version.version_number}` : 'Draft';
+  if (!activeState.value.dirty) {
+    return base;
+  }
+
+  const latestVersionNumber = activeState.value.versions.at(-1)?.version_number ?? 0;
+  return `${base} -> v${latestVersionNumber + 1} (unsaved)`;
+});
 
 type DialogState =
   | {
@@ -326,8 +340,8 @@ function showNotice(message: string) {
 
       <div class="song-header">
         <div>
-          <p class="eyebrow">Editor</p>
           <h2>{{ activeSong?.name ?? 'No song selected' }}</h2>
+          <p class="version-state">{{ editorVersionLabel }}</p>
         </div>
         <div class="song-actions" v-if="activeSong">
           <button type="button" @click="renameSong">Rename</button>
@@ -347,7 +361,7 @@ function showNotice(message: string) {
         <button type="button" class="primary-action" @click="createSong">New song</button>
       </div>
 
-      <StatusBar :song="activeSong" :active="activeState" />
+      <StatusBar :active="activeState" />
     </section>
 
     <DiffPanel :active="activeState" @load-version="loadVersion" @delete-version="deleteVersion" />
