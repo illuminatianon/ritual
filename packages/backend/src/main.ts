@@ -1,7 +1,12 @@
 import { app, BrowserWindow } from 'electron';
-import { join } from 'node:path';
+import { dirname, join } from 'node:path';
+import { fileURLToPath } from 'node:url';
+import { openDatabase } from './db/database';
+import { registerIpcHandlers } from './ipc/register';
 
-process.env.DIST_ELECTRON = join(__dirname, '..');
+const currentDir = dirname(fileURLToPath(import.meta.url));
+
+process.env.DIST_ELECTRON = join(currentDir, '..');
 process.env.DIST = join(process.env.DIST_ELECTRON, '../dist');
 process.env.PUBLIC = process.env.VITE_DEV_SERVER_URL ? join(process.env.DIST_ELECTRON, '../public') : process.env.DIST;
 
@@ -9,14 +14,14 @@ let mainWindow: BrowserWindow | null = null;
 
 function createWindow() {
   mainWindow = new BrowserWindow({
-    width: 1200,
-    height: 800,
-    minWidth: 880,
-    minHeight: 560,
+    width: 1440,
+    height: 900,
+    minWidth: 1040,
+    minHeight: 680,
     title: 'Ritual',
-    backgroundColor: '#101114',
+    backgroundColor: '#111214',
     webPreferences: {
-      preload: join(__dirname, 'preload.js'),
+      preload: join(currentDir, 'preload.mjs'),
       contextIsolation: true,
       nodeIntegration: false,
     },
@@ -24,13 +29,16 @@ function createWindow() {
 
   if (process.env.VITE_DEV_SERVER_URL) {
     void mainWindow.loadURL(process.env.VITE_DEV_SERVER_URL);
-    mainWindow.webContents.openDevTools({ mode: 'detach' });
   } else if (process.env.DIST) {
     void mainWindow.loadFile(join(process.env.DIST, 'index.html'));
   }
 }
 
-app.whenReady().then(createWindow);
+app.whenReady().then(() => {
+  const db = openDatabase(join(app.getPath('userData'), 'ritual.sqlite'));
+  registerIpcHandlers(db);
+  createWindow();
+});
 
 app.on('window-all-closed', () => {
   if (process.platform !== 'darwin') {

@@ -11,8 +11,13 @@
     "esModuleInterop": true,
     "lib": ["ES2022", "DOM", "DOM.Iterable"],
     "skipLibCheck": true,
-    "types": ["vite/client", "node"]
+    "types": ["vite/client", "node"],
+    "paths": {
+      "@/*": ["./packages/frontend/src/*"],
+      "@ritual/backend/*": ["./packages/backend/src/*"],
+      "syllable-engine": ["./packages/syllable-engine/src/index.ts"]
+    }
   },
-  "include": ["src/**/*.ts", "src/**/*.tsx", "src/**/*.vue", "electron/**/*.ts"],
+  "include": ["packages/**/*.ts", "packages/**/*.tsx", "packages/**/*.vue", "vite.config.ts"],
   "references": [{ "path": "./tsconfig.node.json" }]
 }

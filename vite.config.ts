@@ -9,17 +9,26 @@ export default defineConfig({
     vue(),
     electron({
       main: {
-        entry: 'electron/main.ts',
+        entry: 'packages/backend/src/main.ts',
+        vite: {
+          build: {
+            rollupOptions: {
+              external: ['better-sqlite3'],
+            },
+          },
+        },
       },
       preload: {
-        input: 'electron/preload.ts',
+        input: 'packages/backend/src/preload.ts',
       },
     }),
     renderer(),
   ],
   resolve: {
     alias: {
-      '@': fileURLToPath(new URL('./src/renderer', import.meta.url)),
+      '@': fileURLToPath(new URL('./packages/frontend/src', import.meta.url)),
+      '@ritual/backend': fileURLToPath(new URL('./packages/backend/src', import.meta.url)),
+      'syllable-engine': fileURLToPath(new URL('./packages/syllable-engine/src/index.ts', import.meta.url)),
     },
   },
 });
