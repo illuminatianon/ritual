@@ -122,10 +122,10 @@ class FakeDb {
   }
 
   private all(sql: string, args: unknown[]) {
-    if (sql.includes('FROM songs WHERE archived_at IS NOT NULL')) {
+    if (sql.includes('WHERE songs.archived_at IS NOT NULL')) {
       return this.songs.filter((item) => item.archived_at != null);
     }
-    if (sql.includes('FROM songs WHERE archived_at IS NULL')) {
+    if (sql.includes('WHERE songs.archived_at IS NULL')) {
       return this.songs.filter((item) => item.archived_at == null);
     }
     if (sql.startsWith('SELECT * FROM versions')) {

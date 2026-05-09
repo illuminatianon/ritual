@@ -4,6 +4,8 @@ export interface Song {
   created_at: string;
   updated_at: string;
   archived_at: string | null;
+  latest_version_number?: number | null;
+  latest_version_updated_at?: string | null;
 }
 
 export interface Version {

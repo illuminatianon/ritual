@@ -56,8 +56,36 @@ export function createSongRepository(db: RitualDatabase) {
       return db
         .prepare(
           archived
-            ? 'SELECT * FROM songs WHERE archived_at IS NOT NULL ORDER BY updated_at DESC, id DESC'
-            : 'SELECT * FROM songs WHERE archived_at IS NULL ORDER BY updated_at DESC, id DESC',
+            ? `
+              SELECT songs.*,
+                latest.version_number AS latest_version_number,
+                latest.updated_at AS latest_version_updated_at
+              FROM songs
+              LEFT JOIN versions latest
+                ON latest.song_id = songs.id
+                AND latest.version_number = (
+                  SELECT MAX(version_number)
+                  FROM versions
+                  WHERE versions.song_id = songs.id
+                )
+              WHERE songs.archived_at IS NOT NULL
+              ORDER BY songs.updated_at DESC, songs.id DESC
+            `
+            : `
+              SELECT songs.*,
+                latest.version_number AS latest_version_number,
+                latest.updated_at AS latest_version_updated_at
+              FROM songs
+              LEFT JOIN versions latest
+                ON latest.song_id = songs.id
+                AND latest.version_number = (
+                  SELECT MAX(version_number)
+                  FROM versions
+                  WHERE versions.song_id = songs.id
+                )
+              WHERE songs.archived_at IS NULL
+              ORDER BY songs.updated_at DESC, songs.id DESC
+            `,
         )
         .all() as SongRow[];
     },

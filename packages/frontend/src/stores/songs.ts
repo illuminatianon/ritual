@@ -41,6 +41,18 @@ export const useSongsStore = defineStore('songs', {
       this.songs = this.songs.map((item) => (item.id === id ? song : item));
       return song;
     },
+    setLatestVersion(id: number, version: { version_number: number; updated_at: string } | null) {
+      this.songs = this.songs.map((song) =>
+        song.id === id
+          ? {
+              ...song,
+              latest_version_number: version?.version_number ?? null,
+              latest_version_updated_at: version?.updated_at ?? null,
+              updated_at: version?.updated_at ?? song.updated_at,
+            }
+          : song,
+      );
+    },
     async archive(id: number) {
       await api.songs.archive(id);
       this.songs = this.songs.filter((song) => song.id !== id);

@@ -107,7 +107,8 @@ const lineSyllableGutter = gutter({
   lineMarker(view, line) {
     const lineNumber = view.state.doc.lineAt(line.from).number - 1;
     const counts = view.state.field(syllableField)[lineNumber];
-    return !counts || counts.isSection ? null : new SyllableMarker(counts.total);
+    const text = view.state.doc.line(lineNumber + 1).text;
+    return !counts || counts.isSection || text.trim() === '' ? null : new SyllableMarker(counts.total);
   },
 });
 

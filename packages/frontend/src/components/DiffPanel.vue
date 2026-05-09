@@ -44,7 +44,7 @@ function versionDate(version: { updated_at: string; created_at: string }) {
 }
 
 function recompute() {
-  if (!props.active || !targetVersion.value) {
+  if (!props.active || !props.active.documentReady || !targetVersion.value) {
     rows.value = [];
     return;
   }

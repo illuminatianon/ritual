@@ -95,6 +95,17 @@ button:disabled {
   border-bottom: 1px solid #292b30;
 }
 
+.brand-block {
+  display: grid;
+  gap: 12px;
+  min-width: 0;
+}
+
+.brand-block h1 {
+  padding-bottom: 14px;
+  border-bottom: 1px solid #383a40;
+}
+
 .eyebrow {
   margin: 0 0 4px;
   color: #9fb676;

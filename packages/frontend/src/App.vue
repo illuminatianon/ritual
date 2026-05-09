@@ -94,11 +94,7 @@ async function createSong() {
   if (!(await confirmDirtyTransition())) {
     return;
   }
-  const name = await askText({ title: 'New song', value: 'Untitled song' });
-  if (name == null) {
-    return;
-  }
-  const song = await songsStore.create(name);
+  const song = await songsStore.create('Untitled Song');
   await songStore.open(song.id);
 }
 
@@ -131,8 +127,19 @@ async function archiveSong() {
 }
 
 async function saveNewVersion(): Promise<Version | null> {
-  if (!activeState.value) {
+  if (!activeState.value || !activeSong.value) {
     return null;
+  }
+  if (activeSong.value.name === 'Untitled Song' && activeState.value.versions.length === 0) {
+    const name = await askText({
+      title: 'Name song',
+      message: 'Name this song before saving its first version.',
+      value: activeSong.value.name,
+    });
+    if (name == null) {
+      return null;
+    }
+    await songsStore.rename(activeSong.value.id, name);
   }
   const label = await askText({
     title: 'Save new version',

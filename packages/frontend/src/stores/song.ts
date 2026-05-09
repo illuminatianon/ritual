@@ -9,6 +9,7 @@ export interface SongState {
   versions: Version[];
   loadedVersionId: number | null;
   dirty: boolean;
+  documentReady: boolean;
   diffTargetVersionId: number | null;
   view: EditorView | null;
   resetEditorDocument: ((lyrics: string) => void) | null;
@@ -21,6 +22,7 @@ function emptyState(songId: number): SongState {
     versions: [],
     loadedVersionId: null,
     dirty: false,
+    documentReady: false,
     diffTargetVersionId: null,
     view: null,
     resetEditorDocument: null,
@@ -55,6 +57,7 @@ export const useSongStore = defineStore('song', {
     },
     async open(songId: number) {
       const state = this.ensure(songId);
+      state.documentReady = false;
       state.versions = await api.versions.list(songId);
       const head = state.versions.at(-1) ?? null;
       state.loadedVersionId = head?.id ?? null;
@@ -66,6 +69,8 @@ export const useSongStore = defineStore('song', {
       } else if (state.view) {
         this.replaceEditorText(songId, '');
       }
+      state.documentReady = state.view != null;
+      state.activity += 1;
     },
     registerView(songId: number, view: EditorView, resetEditorDocument: (lyrics: string) => void) {
       const state = this.ensure(songId);
@@ -75,7 +80,9 @@ export const useSongStore = defineStore('song', {
       if (loaded) {
         this.replaceEditorText(songId, loaded.lyrics);
       }
+      state.documentReady = true;
       state.dirty = false;
+      state.activity += 1;
     },
     unregisterView(songId: number) {
       const state = this.ensure(songId);
@@ -102,10 +109,13 @@ export const useSongStore = defineStore('song', {
     async loadVersion(songId: number, versionId: number) {
       const state = this.ensure(songId);
       const version = state.versions.find((item) => item.id === versionId) ?? (await api.versions.load(versionId));
+      state.documentReady = false;
       this.replaceEditorText(songId, version.lyrics);
       state.loadedVersionId = version.id;
       state.dirty = false;
       state.diffTargetVersionId = pickLatestVersionId(state.versions);
+      state.documentReady = true;
+      state.activity += 1;
     },
     async saveBumpVersion(songId: number, label?: string) {
       const state = this.ensure(songId);
@@ -114,6 +124,7 @@ export const useSongStore = defineStore('song', {
       state.loadedVersionId = version.id;
       state.diffTargetVersionId = version.id;
       state.dirty = false;
+      useSongsStore().setLatestVersion(songId, version);
       return version;
     },
     async overwriteCurrentVersion(songId: number) {
@@ -128,6 +139,7 @@ export const useSongStore = defineStore('song', {
       state.versions = state.versions.map((item) => (item.id === version.id ? version : item));
       state.diffTargetVersionId = version.id;
       state.dirty = false;
+      useSongsStore().setLatestVersion(songId, state.versions.at(-1) ?? null);
       return version;
     },
     async deleteVersion(songId: number, versionId: number) {
@@ -137,10 +149,14 @@ export const useSongStore = defineStore('song', {
       if (state.loadedVersionId === versionId) {
         const head = state.versions.at(-1) ?? null;
         state.loadedVersionId = head?.id ?? null;
+        state.documentReady = false;
         this.replaceEditorText(songId, head?.lyrics ?? '');
         state.dirty = false;
+        state.documentReady = true;
+        state.activity += 1;
       }
       state.diffTargetVersionId = pickLatestVersionId(state.versions);
+      useSongsStore().setLatestVersion(songId, state.versions.at(-1) ?? null);
     },
     setDiffTarget(songId: number, versionId: number | null) {
       this.ensure(songId).diffTargetVersionId = versionId;
