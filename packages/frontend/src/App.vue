@@ -32,6 +32,13 @@ const editorVersionLabel = computed(() => {
   const latestVersionNumber = activeState.value.versions.at(-1)?.version_number ?? 0;
   return `${base} -> v${latestVersionNumber + 1} (unsaved)`;
 });
+const appTitle = computed(() => {
+  if (!activeSong.value) {
+    return 'Ritual';
+  }
+
+  return `${activeSong.value.name} - ${editorVersionLabel.value} - Ritual`;
+});
 
 type DialogState =
   | {
@@ -78,6 +85,10 @@ watch(
     }
   },
 );
+
+watch(appTitle, (title) => {
+  document.title = title;
+}, { immediate: true });
 
 async function createSong() {
   if (!(await confirmDirtyTransition())) {
