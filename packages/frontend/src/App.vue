@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue';
+import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue';
 import DiffPanel from './components/DiffPanel.vue';
 import EditorPane from './components/EditorPane.vue';
 import Sidebar from './components/Sidebar.vue';
@@ -47,6 +47,7 @@ type DialogState =
       message?: string;
       value: string;
       placeholder?: string;
+      selectValue?: boolean;
       resolve: (value: string | null) => void;
     }
   | {
@@ -59,6 +60,7 @@ type DialogState =
 
 const dialog = ref<DialogState | null>(null);
 const dialogInput = ref('');
+const dialogTextInput = ref<HTMLInputElement | null>(null);
 const notice = ref<string | null>(null);
 let noticeTimeout: number | null = null;
 
@@ -135,6 +137,7 @@ async function saveNewVersion(): Promise<Version | null> {
       title: 'Name song',
       message: 'Name this song before saving its first version.',
       value: activeSong.value.name,
+      selectValue: true,
     });
     if (name == null) {
       return null;
@@ -251,7 +254,7 @@ function handleShortcuts(event: KeyboardEvent) {
   }
 }
 
-function askText(args: { title: string; message?: string; value: string; placeholder?: string }) {
+function askText(args: { title: string; message?: string; value: string; placeholder?: string; selectValue?: boolean }) {
   dialogInput.value = args.value;
   return new Promise<string | null>((resolve) => {
     dialog.value = {
@@ -260,8 +263,15 @@ function askText(args: { title: string; message?: string; value: string; placeho
       message: args.message,
       value: args.value,
       placeholder: args.placeholder,
+      selectValue: args.selectValue,
       resolve,
     };
+    void nextTick(() => {
+      dialogTextInput.value?.focus();
+      if (args.selectValue) {
+        dialogTextInput.value?.select();
+      }
+    });
   });
 }
 
@@ -393,7 +403,7 @@ function showNotice(message: string) {
           <h2>{{ dialog.title }}</h2>
           <p v-if="dialog.message" class="dialog-message">{{ dialog.message }}</p>
         </div>
-        <input v-model="dialogInput" :placeholder="dialog.placeholder" autofocus />
+        <input ref="dialogTextInput" v-model="dialogInput" :placeholder="dialog.placeholder" autofocus />
         <div class="dialog-actions">
           <button type="button" @click="cancelDialog">Cancel</button>
           <button type="submit" class="primary-action">OK</button>
