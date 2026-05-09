@@ -28,7 +28,7 @@ A desktop app for writing and editing song lyrics intended for Suno generation. 
 - Section totals (per-section syllable sums) shown somewhere readable.
 - Save/snapshot versions (manual hotkey, e.g. Cmd/Ctrl+S, with optional label).
 - Version list / picker.
-- Diff panel showing changes between current and a chosen previous version (default: most recent prior).
+- Diff panel showing changes between current editor buffer and a chosen saved baseline version. The baseline picker defaults to the latest saved version and lists older versions newest-first.
 - "Copy to Suno" button: clean lyrics only, no annotations.
 - "Copy for chat" button: lyrics as-is.
 
@@ -99,6 +99,7 @@ versions
   lyrics          TEXT
   label           TEXT NULL     -- optional user note ("rewrote bridge")
   created_at      DATETIME
+  updated_at      DATETIME
 ```
 
 Soft-delete: add `archived_at DATETIME NULL` to `songs`. Archived songs are hidden from the main list but reachable via an "Archived" view, where they can be restored or permanently deleted (cascading drop of all related versions).
@@ -123,7 +124,8 @@ Menu/button labels show the resulting version number dynamically:
 The editor needs to clearly show:
 - Which version is currently loaded.
 - Whether there are unsaved changes (dirty indicator).
-- A status bar near the editor showing relevant metadata for the loaded version — at minimum, the version's created/updated timestamps.
+- The editor header shows loaded/next version state: clean `v3`, dirty `v3 -> v4 (unsaved)`.
+- A status bar near the editor shows secondary loaded-version metadata, currently the update timestamp.
 
 The save action labels themselves ("Save new version [v6]", "Update [v5]") communicate what each action will do, so a separate "next save will be vN" indicator isn't needed.
 
@@ -131,12 +133,12 @@ The save action labels themselves ("Save new version [v6]", "Update [v5]") commu
 
 Three regions:
 
-- **Left sidebar (collapsible):** list of songs from DB. Active song highlighted. Archived songs accessible from a separate view.
+- **Left sidebar:** app title, library label, create button, song list from DB, latest version metadata, active song highlight, archived section.
 - **Center:** CodeMirror editor.
   - Gutter: line syllable count. (Line numbers reserved as a possible future toggle but not prioritized — LLM workflow uses whole sections for context, not line numbers.)
   - Inline annotations: section total syllable counts rendered as CodeMirror decorations next to the section tag (e.g. `[Chorus]  24`). Placement may revisit once the info gets real-world use.
   - Section tags styled dimmer/italic.
-- **Right panel:** diff vs. selected previous version (default: immediately prior). Version picker at top of panel.
+- **Right panel:** custom diff baseline picker at top. The selected row shows version, label, and timestamp; opening it shows other saved versions newest-first. The diff compares that saved version against the current editor buffer.
 
 ## Paste Handling
 
@@ -150,9 +152,9 @@ LLM output is clean by default in current workflow, so no paste cleanup needed a
 
 ## Version Picker (Diff Panel)
 
-- **Selected/closed state:** compact — `v3: tighten chorus` (or just `v3` if no label).
-- **Open dropdown:** richer — version, label, timestamp visible per row.
-- **Loaded version metadata** (created/updated timestamps, etc.) lives in the editor's status bar rather than the picker itself.
+- **Selected/closed state:** two-line row — `v12: tighten chorus` plus timestamp.
+- **Open dropdown:** custom menu with other saved versions newest-first; version, label, timestamp visible per row.
+- **Loaded version state** lives in the editor header; loaded-version timestamp lives in the status bar.
 
 ## Open Questions
 

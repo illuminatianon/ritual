@@ -60,10 +60,12 @@ import type { Api } from './api';
 
 const api: Api = {
   songs: {
-    list:    ()         => ipcRenderer.invoke('songs:list'),
-    create:  (name)     => ipcRenderer.invoke('songs:create', name),
-    rename:  (id, name) => ipcRenderer.invoke('songs:rename', { id, name }),
-    archive: (id)       => ipcRenderer.invoke('songs:archive', id),
+    list:            (args)     => ipcRenderer.invoke('songs:list', args),
+    create:          (name)     => ipcRenderer.invoke('songs:create', name),
+    rename:          (id, name) => ipcRenderer.invoke('songs:rename', { id, name }),
+    archive:         (id)       => ipcRenderer.invoke('songs:archive', id),
+    restore:         (id)       => ipcRenderer.invoke('songs:restore', id),
+    deletePermanent: (id)       => ipcRenderer.invoke('songs:deletePermanent', id),
   },
   versions: {
     list:      (songId)    => ipcRenderer.invoke('versions:list', songId),
@@ -129,6 +131,8 @@ export interface Song {
   created_at: string;
   updated_at: string;
   archived_at: string | null;
+  latest_version_number?: number | null;
+  latest_version_updated_at?: string | null;
 }
 
 export interface Version {
@@ -138,14 +142,17 @@ export interface Version {
   lyrics: string;
   label: string | null;
   created_at: string;
+  updated_at: string;
 }
 
 export interface Api {
   songs: {
-    list(): Promise<Song[]>;
+    list(args?: { archived?: boolean }): Promise<Song[]>;
     create(name: string): Promise<Song>;
     rename(id: number, name: string): Promise<Song>;
     archive(id: number): Promise<void>;
+    restore(id: number): Promise<Song>;
+    deletePermanent(id: number): Promise<void>;
   };
   versions: {
     list(songId: number): Promise<Version[]>;
@@ -167,46 +174,43 @@ Renderer auto-completes `window.api.versions.save(...)`; main implements against
 
 ```
 package.json                      # workspaces root
-tsconfig.base.json                # shared TS config
+tsconfig.json                     # shared TS config and package path aliases
+vite.config.ts                    # Vite + Electron build entries
 packages/
   syllable-engine/
     src/
       index.ts                    # public API
-      cmudict.ts
-      counter.ts
-      heuristic.ts
-      tokenize.ts
     data/
-      cmudict.json                # bundled dict
+      cmudict.json                # small seeded dict for now
     test/
     package.json
-    tsconfig.json
   backend/
     src/
       main.ts                     # Electron bootstrap, window creation
       preload.ts                  # contextBridge API
       api.ts                      # shared types (Api, Song, Version)
       ipc/
-        songs.ts                  # ipcMain.handle for songs:*
-        versions.ts
+        register.ts               # ipcMain.handle for songs:* and versions:*
       db/
-        schema.ts
-        migrations/
-        songs.ts                  # SQL queries
-        versions.ts
+        database.ts               # schema migration + repositories
+        database.test.ts
     package.json
-    tsconfig.json
   frontend/
     src/
       App.vue
       components/
-        Editor.vue
+        EditorPane.vue
         Sidebar.vue
         DiffPanel.vue
+        Toolbar.vue
+        StatusBar.vue
       stores/                     # Pinia
         songs.ts                  # library / sidebar
         song.ts                   # per-song editor state (keyed by id)
         prefs.ts                  # UI preferences
+      editor/
+        extensions.ts
+        sections.ts
       diff/
         compute.ts
       api.ts                      # thin wrapper around window.api
@@ -216,7 +220,8 @@ packages/
 
 ## Boundary Rules
 
-- `frontend/` never imports from `backend/`. The contract is `window.api`.
+- `frontend/` never imports backend runtime code. The renderer contract is `window.api`.
+- `frontend/` may import `@ritual/backend/api` types only.
 - `frontend/` imports `syllable-engine` directly (workspace dependency, bundled at build time).
 - `backend/` doesn't depend on `frontend/` at all.
 - Shared types live in `backend/src/api.ts` and are imported by `frontend/` via workspace path. (Could move to a `packages/shared-types/` later if it grows.)
@@ -234,13 +239,18 @@ state: {
   songs: Song[];                 // non-archived
   archived: Song[];              // loaded lazily when archive view opens
   activeSongId: number | null;
+  archiveOpen: boolean;
 }
 
 actions: {
   loadAll();                     // window.api.songs.list()
+  loadArchived();
   create(name);
   rename(id, name);
   archive(id);
+  restore(id);
+  deletePermanent(id);
+  setLatestVersion(id, version); // keeps sidebar metadata fresh after saves/deletes
   setActive(id);
 }
 ```
@@ -255,9 +265,13 @@ Keyed by song id ("designed for tabs, rendering one") so adding tabs later is a 
 type SongState = {
   songId: number;
   versions: Version[];           // all versions for this song
-  loadedVersionId: number;       // which version is in the editor
+  loadedVersionId: number | null;// which version is in the editor
   dirty: boolean;                // editor differs from loaded version
-  diffTargetVersionId: number;   // which version to diff against
+  documentReady: boolean;        // prevents diffing against an empty transient buffer
+  diffTargetVersionId: number | null; // selected diff baseline
+  view: EditorView | null;
+  resetEditorDocument: ((lyrics: string) => void) | null;
+  activity: number;
 };
 
 state: {
@@ -284,9 +298,9 @@ CodeMirror owns the document during editing. The store does **not** mirror live 
 - Per-line syllable counts come from the gutter extension reading editor state directly; no need to round-trip through Pinia.
 - Mirroring on every keystroke is wasted work.
 
-The store holds a reference to the editor view (or a `getCurrentText()` callback set when the editor mounts). Save actions read text from the editor at save time. The dirty flag is reported by the editor's update listener, not derived from comparing strings.
+The store holds a reference to the editor view and a `resetEditorDocument()` callback set when the editor mounts. Save actions read text from the editor at save time. The dirty flag is reported by the editor's update listener, not derived from comparing strings.
 
-When loading a version, the store calls into the editor view to replace the document — the editor is the sink for "set text," not a source.
+When loading a song/version, the store calls `resetEditorDocument()` rather than dispatching a normal text change. That rebuilds CodeMirror state for the loaded document, clears undo history for the previous document, and avoids marking app-driven loads as dirty.
 
 ### `usePrefsStore` — UI preferences
 
@@ -304,8 +318,7 @@ Persists via localStorage for MVP. (A backend `prefs` table is overkill until pr
 
 ```
 Sidebar.vue          ← useSongsStore
-ArchivedView.vue     ← useSongsStore
-Editor.vue           ← useSongStore (active)
+EditorPane.vue       ← useSongStore (active)
 DiffPanel.vue        ← useSongStore (active)
 StatusBar.vue        ← useSongStore (loaded version metadata)
 Toolbar.vue          ← usePrefsStore + useSongStore (save actions)
@@ -313,14 +326,15 @@ Toolbar.vue          ← usePrefsStore + useSongStore (save actions)
 
 ### Decisions
 
-- **Versions list:** loaded eagerly when a song opens. Songs with hundreds of versions are unlikely; eager is simpler.
+- **Versions list:** loaded eagerly when a song opens. Songs with hundreds of versions are unlikely; eager is simpler. Diff baseline picker displays newest first.
 - **Switching songs:** previous song's `SongState` stays in `byId` (not evicted). Memory cost negligible; makes tab support trivial later.
 - **"Viewing v2 while head is v4":** represented as `loadedVersionId = 2`. Save actions decide whether to bump or overwrite based on whether `loadedVersionId` is the current head.
+- **Diff baseline:** defaults to the latest saved version. The right panel compares the current editor buffer against the custom baseline picker selection.
 
 ## SQLite & Migrations
 
-- **Library:** `better-sqlite3`. Sync API, fast, ergonomic. Rebuilt for Electron's Node version via `electron-rebuild` in postinstall.
-- **Migrations:** Hand-rolled runner using SQLite's built-in `PRAGMA user_version`. Migration files are numbered TS files in `backend/src/db/migrations/` (e.g. `001_init.ts`, `002_add_archived_at.ts`), each exporting an `up(db)` function. Runner reads `user_version`, applies any newer migrations in order, bumps the version. Runs at app start in main, before any IPC handler binds.
+- **Library:** `better-sqlite3`. Sync API, fast, ergonomic. Rebuilt for Electron's Node version via `pnpm rebuild:native`.
+- **Migrations:** Current MVP uses a hand-rolled `PRAGMA user_version` runner inside `packages/backend/src/db/database.ts`. It applies the v1 schema at app start in main, before IPC handlers bind. Numbered migration files are still a likely next step once schema changes begin accumulating.
 - Rationale: third-party migration libraries bring more ceremony than this app needs. The runner is ~30 lines. If schema management gets complex enough to want fancier tooling (rollback, branching, named migrations), swap in something heavier later — the data shape doesn't depend on the runner.
 
 ## Open Questions

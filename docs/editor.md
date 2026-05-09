@@ -10,7 +10,7 @@ Covers the CodeMirror 6 editor, its custom extensions, how it connects to the sy
 4. Show section total next to each section tag (small chip).
 5. Show per-word syllable chips (toggleable via toolbar).
 6. Report dirty state to the song store.
-7. Expose read/write hooks so the store can save and load text.
+7. Expose read/reset hooks so the store can save and load text.
 
 Not in scope: code-style syntax highlighting, autocomplete, folding, line numbers (deferred).
 
@@ -98,7 +98,7 @@ const lineSyllableGutter = gutter({
     const counts = view.state.field(syllableField);
     const lineNum = view.state.doc.lineAt(line.from).number - 1;
     const lc = counts[lineNum];
-    return lc.isSection ? null : new SyllableMarker(lc.total);
+    return !lc || lc.isSection || lc.total === 0 ? null : new SyllableMarker(lc.total);
   },
 });
 ```
@@ -170,21 +170,24 @@ Save actions explicitly call `onDirty(false)` after a successful save.
 
 ## Store ↔ Editor Bridge
 
-The store doesn't mirror text. It holds a reference to the live `EditorView`.
+The store doesn't mirror text. It holds a reference to the live `EditorView` plus a reset callback that rebuilds CodeMirror state for app-driven document loads.
 
 ```ts
 // useSongStore (additions)
 type SongState = {
   // ...
   view: EditorView | null;       // set when editor mounts
+  resetEditorDocument: ((lyrics: string) => void) | null;
 };
 
 actions: {
-  registerView(songId: number, view: EditorView) {
+  registerView(songId: number, view: EditorView, resetEditorDocument: (lyrics: string) => void) {
     this.byId[songId].view = view;
+    this.byId[songId].resetEditorDocument = resetEditorDocument;
   },
   unregisterView(songId: number) {
     this.byId[songId].view = null;
+    this.byId[songId].resetEditorDocument = null;
   },
 
   getCurrentText(songId: number): string {
@@ -193,12 +196,7 @@ actions: {
 
   loadVersion(songId: number, versionId: number) {
     const v = this.byId[songId].versions.find(x => x.id === versionId)!;
-    const view = this.byId[songId].view;
-    if (view) {
-      view.dispatch({
-        changes: { from: 0, to: view.state.doc.length, insert: v.lyrics },
-      });
-    }
+    this.byId[songId].resetEditorDocument?.(v.lyrics);
     this.byId[songId].loadedVersionId = versionId;
     this.byId[songId].dirty = false;
   },
@@ -213,7 +211,7 @@ actions: {
 };
 ```
 
-`Editor.vue` calls `registerView` on mount, `unregisterView` on unmount, and passes the dirty/activity callbacks into the extension list.
+`EditorPane.vue` calls `registerView` on mount, `unregisterView` on unmount, and passes the dirty/activity callbacks into the extension list. Programmatic loads rebuild editor state; user edits still flow through the dirty reporter.
 
 ## Diff Recompute (Activity-Driven)
 
@@ -252,6 +250,7 @@ explicit (immediate compute):
   - song opened
   - diff target version changed
   - save (bump or overwrite) completed
+  - editor document becomes ready after a programmatic load
 
 activity-driven (interval while typing):
   - dirtyReporter onActivity() callback
@@ -269,5 +268,5 @@ Both values are knobs to tweak after real use.
 
 - **Section tag regex.** `/^\[(.+)\]$/` is the starting point. Should bracketed text mid-line ever count as a tag? Probably not — keeps things predictable. Decide while building.
 - **Heuristic vs. CMU source visual cue.** Engine returns `source` per word; whether to surface this in the chip rendering is deferred until overrides exist.
-- **Diff render style.** Inline (unified) vs. side-by-side. Inline is probably cleaner for lyrics. Defer to build.
+- **Diff render style.** Inline unified diff is the current MVP choice.
 - **Word boundary detection for chips.** Splitting on whitespace works for most cases but punctuation (`don't`, `rock'n'roll`) needs care. Engine's tokenizer should be the authority; the chip decoration walks the engine's word ranges, not its own regex.
