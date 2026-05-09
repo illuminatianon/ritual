@@ -36,7 +36,7 @@
     2. Restore test song, get "Unsaved changes popup"
   - confirmed: a freshly loaded song is considered dirty
   - undo state management
-- [ ] find/replace (as fluent an interface as possible, ideally similar to how vs code works but it doesn't need to be as complicated, can be case insensitive doesn't need regex etc)
+- [x] find/replace (as fluent an interface as possible, ideally similar to how vs code works but it doesn't need to be as complicated, can be case insensitive doesn't need regex etc)
 
 ## diffing
 

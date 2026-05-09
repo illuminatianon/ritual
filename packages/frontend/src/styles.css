@@ -336,6 +336,114 @@ small,
   color: #e0b48a;
 }
 
+.cm-search {
+  display: grid;
+  grid-template-columns: max-content max-content max-content max-content max-content max-content max-content 1fr max-content;
+  align-items: center;
+  gap: 8px;
+  border-bottom: 1px solid #292b30 !important;
+  padding: 8px !important;
+  background: #15171b !important;
+  color: #bdb7ad;
+  font-size: 0.78rem;
+}
+
+.cm-search > input:first-child,
+.cm-search > button:not([name="replace"]):not([name="replaceAll"]):not([name="close"]),
+.cm-search > label {
+  grid-row: 1;
+}
+
+.cm-search > input:not(:first-child),
+.cm-search > button[name="replace"],
+.cm-search > button[name="replaceAll"] {
+  grid-row: 2;
+}
+
+.cm-search input {
+  min-height: 34px;
+  border-color: #383a40;
+  background: #1b1d22;
+  color: #f4f1ea;
+}
+
+.cm-search input:focus {
+  border-color: #d19a2a;
+  outline: 2px solid rgba(209, 154, 42, 0.32);
+  outline-offset: 0;
+}
+
+.cm-search button {
+  min-height: 34px;
+  border: 1px solid #383a40;
+  border-radius: 6px;
+  background: #202329;
+  color: #d9d3c7;
+  font-size: 0.72rem;
+  text-transform: capitalize;
+}
+
+.cm-search button:hover {
+  border-color: #66705d;
+  background: #252a23;
+  color: #fff8ec;
+}
+
+.cm-search button[name="close"] {
+  grid-row: 1;
+  grid-column: -1;
+  margin-left: auto;
+  border-color: transparent;
+  background: transparent;
+  color: #d9d3c7;
+  font-size: 1rem;
+}
+
+.cm-search button[name="close"]:hover {
+  color: #fff8ec;
+}
+
+.cm-search label {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  color: #aeb4a6;
+  font-size: 0.78rem;
+}
+
+.cm-search label input[type="checkbox"] {
+  display: inline-grid;
+  place-content: center;
+  width: 14px;
+  height: 14px;
+  min-height: 14px;
+  margin: 0;
+  padding: 0;
+  appearance: none;
+  border: 1px solid #66705d;
+  border-radius: 4px;
+  background: #111214;
+}
+
+.cm-search label input[type="checkbox"]::before {
+  content: "";
+  width: 7px;
+  height: 7px;
+  border-radius: 2px;
+  background: #9fb676;
+  transform: scale(0);
+  transition: transform 120ms ease;
+}
+
+.cm-search label input[type="checkbox"]:checked::before {
+  transform: scale(1);
+}
+
+.cm-search label input[type="checkbox"]:focus-visible {
+  outline: 2px solid rgba(159, 182, 118, 0.34);
+  outline-offset: 2px;
+}
+
 .baseline-picker {
   position: relative;
   border-bottom: 1px solid #292b30;

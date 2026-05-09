@@ -1,5 +1,6 @@
 import { oneDark } from '@codemirror/theme-one-dark';
 import { defaultKeymap, history, historyKeymap } from '@codemirror/commands';
+import { search, searchKeymap } from '@codemirror/search';
 import { Compartment, EditorState, RangeSetBuilder, StateField } from '@codemirror/state';
 import {
   Decoration,
@@ -49,7 +50,8 @@ export function createLyricsExtensions(opts: {
   return [
     oneDark,
     history(),
-    keymap.of([...defaultKeymap, ...historyKeymap]),
+    keymap.of([...defaultKeymap, ...historyKeymap, ...searchKeymap]),
+    search({ top: true }),
     sectionRangesField,
     syllableField,
     lineSyllableGutter,
