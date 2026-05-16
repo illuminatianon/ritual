@@ -45,13 +45,4 @@
 
 ## architecture / spec debt
 
-- [ ] Split the inline SQLite v1 migration into numbered migration files once the next schema change lands.
-- [ ] Add a real native SQLite integration test strategy separate from the pure unit test suite.
-- [ ] Decide whether shared API types should stay in `packages/backend/src/api.ts` or move to a small shared-types package as the IPC surface grows.
-- [ ] Expand seeded CMUdict data or add a generation/import step for the full dictionary.
-- [ ] Persist and expose global/song/line pronunciation overrides.
-- [ ] Add word-click pronunciation/override popover.
-- [ ] Add stress display modes.
-- [ ] Add visible syllable split display.
-- [ ] Add optional line numbers toggle.
-- [ ] Add tabs/multiple open songs when the single-song workflow starts feeling cramped.
+All previously-listed items are now reflected in the spec docs — see `architecture.md` (migrations, native integration tests, shared types) and `syllable-engine.md` (CMUdict dictionary data, overrides, popover, stress, splits) and `lyrics-editor-design.md` (line numbers toggle, tabs).

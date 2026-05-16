@@ -21,6 +21,15 @@ Lives at `packages/syllable-engine/`. Self-contained workspace package, imported
 - CMUdict data (bundled in `data/cmudict.json`).
 - Optionally `syllable` (npm) for the heuristic fallback path.
 
+### Dictionary Data
+
+MVP ships a small seeded subset of CMUdict checked into `data/cmudict.json` — enough to exercise the lookup path during development. Before the engine is useful for real writing it needs the full dictionary, via one of:
+
+- **Bundle the full CMUdict** as a generated JSON asset (~3–4 MB raw, smaller compressed). Add a build step that ingests the upstream CMUdict source and emits the JSON the engine loads.
+- **Import on first run** from a packaged data file unpacked at app start.
+
+Either way, the engine's public API doesn't change — `loadDict()` continues to be the single entry point. The generation/import step is what's missing.
+
 ### Does not depend on
 
 - Electron, IPC, `window.api` — none of it. The engine has no awareness it runs in a renderer.

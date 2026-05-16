@@ -337,6 +337,11 @@ Toolbar.vue          ← usePrefsStore + useSongStore (save actions)
 - **Migrations:** Current MVP uses a hand-rolled `PRAGMA user_version` runner inside `packages/backend/src/db/database.ts`. It applies the v1 schema at app start in main, before IPC handlers bind. Numbered migration files are still a likely next step once schema changes begin accumulating.
 - Rationale: third-party migration libraries bring more ceremony than this app needs. The runner is ~30 lines. If schema management gets complex enough to want fancier tooling (rollback, branching, named migrations), swap in something heavier later — the data shape doesn't depend on the runner.
 
+### Testing
+
+- Unit tests run the repositories against `better-sqlite3` in-process and are part of the pure test suite.
+- A separate **native integration test** layer is still needed: exercising the real Electron-rebuilt native module, IPC handlers, and migration runner end-to-end under the same Node version the app ships with. Likely a small playwright/electron harness or a headless main-process boot that runs migrations + a representative handler sequence against a temp DB file. Kept separate so the fast unit suite stays pure JS and CI can gate the slow native suite independently.
+
 ## Open Questions
 
 (None blocking. Decisions deferred to scaffolding will be made in code, not in docs.)
