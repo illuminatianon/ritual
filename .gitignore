@@ -32,3 +32,5 @@ Thumbs.db
 # Electron
 out/
 *.asar
+
+.claude/*
