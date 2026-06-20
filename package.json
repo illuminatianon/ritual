@@ -9,8 +9,9 @@
     "dev": "vite --host 127.0.0.1",
     "build": "vue-tsc -p packages/frontend/tsconfig.json --noEmit && vite build",
     "preview": "vite preview --host 127.0.0.1",
-    "electron:dev": "vite --host 127.0.0.1",
-    "postinstall": "electron-builder install-app-deps",
+    "electron:deps": "electron-builder install-app-deps",
+    "electron:dev": "pnpm electron:deps && vite --host 127.0.0.1",
+    "postinstall": "pnpm electron:deps",
     "electron:build": "pnpm build && electron-builder --linux AppImage",
     "electron:build:linux": "pnpm build && electron-builder --linux AppImage",
     "test": "TMPDIR=/tmp vitest run"
