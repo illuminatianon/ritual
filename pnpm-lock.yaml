@@ -90,6 +90,7 @@ importers:
       better-sqlite3:
         specifier: ^12.4.6
         version: 12.9.0
+    devDependencies:
       electron:
         specifier: ^38.4.0
         version: 38.8.6
