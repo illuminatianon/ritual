@@ -16,7 +16,7 @@
 
 body {
   margin: 0;
-  min-width: 1040px;
+  min-width: 900px;
   min-height: 100vh;
   overflow: hidden;
 }
@@ -53,6 +53,11 @@ button:disabled {
   grid-template-columns: 260px minmax(480px, 1fr) 360px;
   height: 100vh;
   background: #111214;
+  transition: grid-template-columns 180ms ease;
+}
+
+.app-shell.sidebar-closed {
+  grid-template-columns: 42px minmax(480px, 1fr) 360px;
 }
 
 .app-shell > * {
@@ -70,6 +75,25 @@ button:disabled {
   display: grid;
   grid-template-rows: auto minmax(0, 1fr) auto auto;
   border-right: 1px solid #292b30;
+  overflow: hidden;
+}
+
+.sidebar--slim {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  padding: 10px 0;
+  gap: 10px;
+}
+
+.slim-expand {
+  flex: 1;
+  width: 100%;
+  cursor: pointer;
+}
+
+.slim-expand:hover {
+  background: rgba(255, 255, 255, 0.03);
 }
 
 .diff-panel {
@@ -80,8 +104,6 @@ button:disabled {
 
 .sidebar-head,
 .panel-head,
-.song-header,
-.toolbar,
 .status-bar {
   display: flex;
   align-items: center;
@@ -93,6 +115,13 @@ button:disabled {
 .panel-head {
   padding: 18px;
   border-bottom: 1px solid #292b30;
+}
+
+.sidebar-head-actions {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-shrink: 0;
 }
 
 .brand-block {
@@ -134,6 +163,22 @@ h2 {
   width: 34px;
   padding: 0;
   font-size: 1.2rem;
+}
+
+.collapse-btn {
+  width: 28px;
+  min-height: 28px;
+  padding: 0;
+  font-size: 1rem;
+  border-color: transparent;
+  background: transparent;
+  color: #9b9d9a;
+}
+
+.collapse-btn:hover {
+  border-color: #383a40;
+  background: #1b1d22;
+  color: #f4f1ea;
 }
 
 .primary,
@@ -213,24 +258,60 @@ small,
 
 .workspace {
   display: grid;
-  grid-template-rows: auto auto minmax(0, 1fr) auto;
+  grid-template-rows: auto minmax(0, 1fr) auto;
   min-height: 0;
   min-width: 0;
   overflow: hidden;
   background: #111214;
 }
 
-.toolbar {
-  min-height: 58px;
-  padding: 10px 16px;
-  border-bottom: 1px solid #292b30;
-}
+/* ── Editor header (replaces toolbar + song-header) ── */
 
-.toolbar-group,
-.song-actions {
+.editor-header {
   display: flex;
   align-items: center;
+  gap: 10px;
+  padding: 0 14px;
+  min-height: 52px;
+  border-bottom: 1px solid #292b30;
+  flex-wrap: wrap;
+}
+
+.editor-title {
+  display: flex;
+  align-items: baseline;
   gap: 8px;
+  min-width: 0;
+  margin-right: auto;
+}
+
+.song-name {
+  font-size: 1.05rem;
+  font-weight: 600;
+  color: #fff8ec;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.version-chip {
+  color: #aeb4a6;
+  font-size: 0.82rem;
+  white-space: nowrap;
+}
+
+.editor-actions {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+
+.action-sep {
+  width: 1px;
+  height: 18px;
+  background: #292b30;
+  margin: 0 2px;
 }
 
 .toggle {
@@ -241,16 +322,7 @@ small,
   font-size: 0.9rem;
 }
 
-.song-header {
-  padding: 14px 18px;
-  border-bottom: 1px solid #292b30;
-}
-
-.version-state {
-  margin: 6px 0 0;
-  color: #aeb4a6;
-  font-size: 0.86rem;
-}
+/* ── Editor pane ── */
 
 .editor-pane {
   height: 100%;

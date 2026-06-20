@@ -4,7 +4,6 @@ import DiffPanel from './components/DiffPanel.vue';
 import EditorPane from './components/EditorPane.vue';
 import Sidebar from './components/Sidebar.vue';
 import StatusBar from './components/StatusBar.vue';
-import Toolbar from './components/Toolbar.vue';
 import type { Version } from '@ritual/backend/api';
 import { usePrefsStore } from './stores/prefs';
 import { useSongStore } from './stores/song';
@@ -14,10 +13,13 @@ const songsStore = useSongsStore();
 const songStore = useSongStore();
 const prefsStore = usePrefsStore();
 
+const sidebarOpen = ref(true);
+
 const activeSong = computed(() => songsStore.activeSong);
 const activeState = computed(() => songStore.active);
 const activeVersion = computed(() => songStore.activeVersion);
 const initialDocument = computed(() => activeVersion.value?.lyrics ?? '');
+
 const editorVersionLabel = computed(() => {
   if (!activeState.value) {
     return 'No version loaded';
@@ -30,8 +32,19 @@ const editorVersionLabel = computed(() => {
   }
 
   const latestVersionNumber = activeState.value.versions.at(-1)?.version_number ?? 0;
-  return `${base} -> v${latestVersionNumber + 1} (unsaved)`;
+  return `${base} → v${latestVersionNumber + 1}*`;
 });
+
+const nextVersionNum = computed(() => {
+  return (activeState.value?.versions.at(-1)?.version_number ?? 0) + 1;
+});
+
+const loadedVersionLabel = computed(() => {
+  if (!activeState.value) return 'draft';
+  const v = activeState.value.versions.find((ver) => ver.id === activeState.value?.loadedVersionId);
+  return v ? `v${v.version_number}` : 'draft';
+});
+
 const appTitle = computed(() => {
   if (!activeSong.value) {
     return 'Ritual';
@@ -339,14 +352,17 @@ function showNotice(message: string) {
 </script>
 
 <template>
-  <main class="app-shell">
+  <main class="app-shell" :class="{ 'sidebar-closed': !sidebarOpen }">
     <Sidebar
+      :collapsed="!sidebarOpen"
       :songs="songsStore.songs"
       :archived="songsStore.archived"
       :active-song-id="songsStore.activeSongId"
       :archive-open="songsStore.archiveOpen"
       @create="createSong"
       @select="selectSong"
+      @collapse="sidebarOpen = false"
+      @expand="sidebarOpen = true"
       @toggle-archive="
         songsStore.archiveOpen = !songsStore.archiveOpen;
         songsStore.archiveOpen && songsStore.loadArchived()
@@ -356,22 +372,33 @@ function showNotice(message: string) {
     />
 
     <section class="workspace">
-      <Toolbar
-        :active="activeState"
-        :show-word-annotations="prefsStore.showWordAnnotations"
-        @save-new="saveNewVersion"
-        @overwrite="overwriteVersion"
-        @copy-suno="copyLyrics"
-        @copy-chat="copyLyrics"
-        @toggle-words="prefsStore.setShowWordAnnotations"
-      />
-
-      <div class="song-header">
-        <div>
-          <h2>{{ activeSong?.name ?? 'No song selected' }}</h2>
-          <p class="version-state">{{ editorVersionLabel }}</p>
+      <div class="editor-header">
+        <div class="editor-title">
+          <span class="song-name">{{ activeSong?.name ?? 'No song selected' }}</span>
+          <span v-if="activeState" class="version-chip">{{ editorVersionLabel }}</span>
         </div>
-        <div class="song-actions" v-if="activeSong">
+
+        <div v-if="activeState" class="editor-actions">
+          <button type="button" class="primary-action" @click="saveNewVersion">
+            Save v{{ nextVersionNum }}
+          </button>
+          <button type="button" @click="overwriteVersion">↑ {{ loadedVersionLabel }}</button>
+
+          <div class="action-sep" />
+
+          <button type="button" @click="copyLyrics">Suno</button>
+          <button type="button" @click="copyLyrics">Chat</button>
+          <label class="toggle">
+            <input
+              type="checkbox"
+              :checked="prefsStore.showWordAnnotations"
+              @change="prefsStore.setShowWordAnnotations(($event.target as HTMLInputElement).checked)"
+            />
+            Words
+          </label>
+
+          <div class="action-sep" />
+
           <button type="button" @click="renameSong">Rename</button>
           <button type="button" class="danger" @click="archiveSong">Archive</button>
         </div>

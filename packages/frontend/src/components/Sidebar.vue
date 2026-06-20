@@ -6,16 +6,17 @@ defineProps<{
   archived: Song[];
   activeSongId: number | null;
   archiveOpen: boolean;
+  collapsed: boolean;
 }>();
 
 defineEmits<{
   create: [];
   select: [songId: number];
-  rename: [song: Song];
-  archive: [song: Song];
   toggleArchive: [];
   restore: [song: Song];
   deletePermanent: [song: Song];
+  collapse: [];
+  expand: [];
 }>();
 
 function versionLabel(song: Song) {
@@ -28,44 +29,54 @@ function updatedDate(song: Song) {
 </script>
 
 <template>
-  <aside class="sidebar">
-    <div class="sidebar-head">
-      <div class="brand-block">
-        <h1>Ritual</h1>
-        <p class="eyebrow">Library</p>
-      </div>
+  <aside class="sidebar" :class="{ 'sidebar--slim': collapsed }">
+    <template v-if="collapsed">
       <button class="icon-button primary" type="button" title="New song" @click="$emit('create')">+</button>
-    </div>
+      <div class="slim-expand" @click="$emit('expand')" title="Open library" />
+    </template>
 
-    <div class="song-list">
-      <button
-        v-for="song in songs"
-        :key="song.id"
-        class="song-row"
-        :class="{ active: song.id === activeSongId }"
-        type="button"
-        @click="$emit('select', song.id)"
-      >
-        <span>{{ song.name }}</span>
-        <small>{{ versionLabel(song) }} · {{ updatedDate(song) }}</small>
-      </button>
-    </div>
-
-    <div class="sidebar-actions">
-      <button type="button" @click="$emit('toggleArchive')">
-        {{ archiveOpen ? 'Hide archived' : 'Archived' }}
-      </button>
-    </div>
-
-    <div v-if="archiveOpen" class="archive-list">
-      <div v-for="song in archived" :key="song.id" class="archive-row">
-        <span>{{ song.name }}</span>
-        <div>
-          <button type="button" @click="$emit('restore', song)">Restore</button>
-          <button type="button" class="danger" @click="$emit('deletePermanent', song)">Delete</button>
+    <template v-else>
+      <div class="sidebar-head">
+        <div class="brand-block">
+          <h1>Ritual</h1>
+          <p class="eyebrow">Library</p>
+        </div>
+        <div class="sidebar-head-actions">
+          <button class="icon-button primary" type="button" title="New song" @click="$emit('create')">+</button>
+          <button class="collapse-btn" type="button" title="Collapse sidebar" @click="$emit('collapse')">‹</button>
         </div>
       </div>
-      <p v-if="archived.length === 0" class="empty-note">No archived songs.</p>
-    </div>
+
+      <div class="song-list">
+        <button
+          v-for="song in songs"
+          :key="song.id"
+          class="song-row"
+          :class="{ active: song.id === activeSongId }"
+          type="button"
+          @click="$emit('select', song.id)"
+        >
+          <span>{{ song.name }}</span>
+          <small>{{ versionLabel(song) }} · {{ updatedDate(song) }}</small>
+        </button>
+      </div>
+
+      <div class="sidebar-actions">
+        <button type="button" @click="$emit('toggleArchive')">
+          {{ archiveOpen ? 'Hide archived' : 'Archived' }}
+        </button>
+      </div>
+
+      <div v-if="archiveOpen" class="archive-list">
+        <div v-for="song in archived" :key="song.id" class="archive-row">
+          <span>{{ song.name }}</span>
+          <div>
+            <button type="button" @click="$emit('restore', song)">Restore</button>
+            <button type="button" class="danger" @click="$emit('deletePermanent', song)">Delete</button>
+          </div>
+        </div>
+        <p v-if="archived.length === 0" class="empty-note">No archived songs.</p>
+      </div>
+    </template>
   </aside>
 </template>
