@@ -10,10 +10,8 @@
     "build": "vue-tsc -p packages/frontend/tsconfig.json --noEmit && vite build",
     "preview": "vite preview --host 127.0.0.1",
     "electron:dev": "vite --host 127.0.0.1",
-    "electron:build": "pnpm build && electron-builder --linux AppImage && electron-builder --win zip",
+    "electron:build": "pnpm build && electron-builder --linux AppImage",
     "electron:build:linux": "pnpm build && electron-builder --linux AppImage",
-    "electron:build:win": "pnpm build && electron-builder --win zip",
-    "electron:build:win:installer": "pnpm build && electron-builder --win nsis",
     "test": "TMPDIR=/tmp vitest run"
   },
   "keywords": [],
@@ -61,12 +59,6 @@
         "AppImage"
       ],
       "category": "Utility"
-    },
-    "win": {
-      "signAndEditExecutable": false,
-      "target": [
-        "zip"
-      ]
     }
   }
 }
