@@ -2,13 +2,14 @@
 import { EditorState } from '@codemirror/state';
 import { EditorView } from '@codemirror/view';
 import { onBeforeUnmount, onMounted, ref, watch } from 'vue';
-import { createLyricsExtensions, setWordChips } from '../editor/extensions';
+import { createLyricsExtensions, setBaselineLyrics, setWordChips } from '../editor/extensions';
 import { useSongStore } from '../stores/song';
 
 const props = defineProps<{
   songId: number;
   initialDocument: string;
   showWordAnnotations: boolean;
+  baselineLyrics: string | null;
 }>();
 
 const songStore = useSongStore();
@@ -20,6 +21,7 @@ function createEditorState(doc: string) {
     doc,
     extensions: createLyricsExtensions({
       showWordAnnotations: props.showWordAnnotations,
+      baselineLyrics: props.baselineLyrics,
       onDirty: (dirty) => songStore.markDirty(props.songId, dirty),
       onActivity: () => songStore.markActivity(props.songId),
     }),
@@ -46,6 +48,15 @@ watch(
   (enabled) => {
     if (editorView) {
       setWordChips(editorView, enabled);
+    }
+  },
+);
+
+watch(
+  () => props.baselineLyrics,
+  (lyrics) => {
+    if (editorView) {
+      setBaselineLyrics(editorView, lyrics);
     }
   },
 );

@@ -19,6 +19,15 @@ const activeSong = computed(() => songsStore.activeSong);
 const activeState = computed(() => songStore.active);
 const activeVersion = computed(() => songStore.activeVersion);
 const initialDocument = computed(() => activeVersion.value?.lyrics ?? '');
+const diffBaselineLyrics = computed(() => {
+  const active = activeState.value;
+
+  if (!active?.diffTargetVersionId) {
+    return null;
+  }
+
+  return active.versions.find((version) => version.id === active.diffTargetVersionId)?.lyrics ?? null;
+});
 
 const editorVersionLabel = computed(() => {
   if (!activeState.value) {
@@ -410,6 +419,7 @@ function showNotice(message: string) {
         :song-id="songsStore.activeSongId"
         :initial-document="initialDocument"
         :show-word-annotations="prefsStore.showWordAnnotations"
+        :baseline-lyrics="diffBaselineLyrics"
       />
       <div v-else class="empty-editor">
         <h2>Create a song to start writing.</h2>
