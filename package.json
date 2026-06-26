@@ -14,6 +14,8 @@
     "postinstall": "pnpm electron:deps",
     "electron:build": "pnpm electron:deps && pnpm build && electron-builder --linux AppImage",
     "electron:build:linux": "pnpm electron:deps && pnpm build && electron-builder --linux AppImage",
+    "electron:build:windows": "node scripts/assert-platform.mjs win32 && pnpm electron:deps && pnpm build && electron-builder --win nsis --x64",
+    "electron:build:windows:wsl": "node scripts/build-windows-from-wsl.mjs",
     "test": "TMPDIR=/tmp vitest run"
   },
   "keywords": [],
@@ -61,6 +63,11 @@
         "AppImage"
       ],
       "category": "Utility"
+    },
+    "win": {
+      "target": [
+        "nsis"
+      ]
     }
   }
 }
