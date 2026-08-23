@@ -31,17 +31,6 @@ function capture(command, args, options = {}) {
   return result.stdout.trim();
 }
 
-function toWindowsPath(path) {
-  const match = path.match(/^\/mnt\/([a-z])\/(.*)$/i);
-
-  if (!match) {
-    console.error(`[windows-build] WINDOWS_BUILD_DIR must be under /mnt/<drive>; got ${path}`);
-    process.exit(1);
-  }
-
-  return `${match[1].toUpperCase()}:\\${match[2].replaceAll('/', '\\')}`;
-}
-
 function assertCleanHead(repoRoot) {
   const tracked = capture('git', ['status', '--porcelain', '--untracked-files=no'], { cwd: repoRoot });
   const untracked = capture('git', ['ls-files', '--others', '--exclude-standard'], { cwd: repoRoot });
@@ -86,7 +75,8 @@ if (existingWorktree.status === 0 && existingWorktree.stdout.trim() === 'true') 
   run('git', ['-C', buildDir, 'config', 'core.filemode', 'false']);
 }
 
-const windowsBuildDir = toWindowsPath(buildDir);
-const windowsCommand = `cd /d "${windowsBuildDir}" && pnpm install --frozen-lockfile && pnpm electron:build:windows`;
-
-run('cmd.exe', ['/c', windowsCommand]);
+run(
+  'cmd.exe',
+  ['/d', '/c', 'pnpm install --frozen-lockfile && pnpm electron:build:windows'],
+  { cwd: buildDir },
+);
