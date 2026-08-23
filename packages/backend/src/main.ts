@@ -5,11 +5,9 @@ import { openDatabase } from './db/database';
 import { registerIpcHandlers } from './ipc/register';
 
 const currentDir = dirname(fileURLToPath(import.meta.url));
-
 app.disableHardwareAcceleration();
 app.commandLine.appendSwitch('disable-gpu');
 app.commandLine.appendSwitch('disable-gpu-compositing');
-app.commandLine.appendSwitch('disable-software-rasterizer');
 
 process.env.DIST_ELECTRON = join(currentDir, '..');
 process.env.DIST = join(process.env.DIST_ELECTRON, 'dist');
