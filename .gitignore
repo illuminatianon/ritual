@@ -34,3 +34,5 @@ out/
 *.asar
 
 .claude/*
+
+repomix-output.xml
