@@ -2,21 +2,19 @@
   "name": "ritual",
   "version": "1.0.0",
   "private": true,
-  "description": "Electron, Vue 3, TypeScript, and CodeMirror desktop app.",
-  "main": "dist-electron/main.js",
+  "description": "Self-hosted Nuxt lyrics editor.",
   "type": "module",
   "scripts": {
-    "dev": "vite --host 127.0.0.1",
-    "build": "vue-tsc -p packages/frontend/tsconfig.json --noEmit && vite build",
-    "preview": "vite preview --host 127.0.0.1",
-    "electron:deps": "node scripts/install-electron-native-deps.mjs",
-    "electron:dev": "pnpm electron:deps && vite --host 127.0.0.1",
-    "postinstall": "pnpm electron:deps",
-    "electron:build": "pnpm electron:deps && pnpm build && electron-builder --linux AppImage",
-    "electron:build:linux": "pnpm electron:deps && pnpm build && electron-builder --linux AppImage",
-    "electron:build:windows": "node scripts/assert-platform.mjs win32 && pnpm electron:deps && pnpm build && electron-builder --win nsis --x64",
-    "electron:build:windows:wsl": "node scripts/build-windows-from-wsl.mjs",
-    "test": "TMPDIR=/tmp vitest run"
+    "dev": "nuxt dev --host 127.0.0.1",
+    "build": "nuxt build",
+    "preview": "node .output/server/index.mjs",
+    "test": "TMPDIR=/tmp vitest run",
+    "test:db": "node scripts/test-db.mjs",
+    "typecheck": "nuxt typecheck",
+    "db:generate": "drizzle-kit generate",
+    "db:migrate": "drizzle-kit migrate",
+    "db:studio": "drizzle-kit studio",
+    "import:sqlite": "tsx scripts/import-electron-sqlite.ts"
   },
   "keywords": [],
   "author": "",
@@ -25,49 +23,34 @@
   "dependencies": {
     "@codemirror/commands": "^6.10.0",
     "@codemirror/lang-javascript": "^6.2.4",
+    "@codemirror/search": "^6.7.0",
     "@codemirror/state": "^6.5.2",
     "@codemirror/theme-one-dark": "^6.1.3",
     "@codemirror/view": "^6.38.4",
-    "@ritual/backend": "workspace:*",
-    "@ritual/frontend": "workspace:*",
-    "better-sqlite3": "^12.4.6",
+    "@pinia/nuxt": "^1.0.2",
     "diff": "^8.0.2",
-    "pinia": "^3.0.4",
+    "drizzle-orm": "^0.45.2",
+    "h3": "1.15.11",
+    "nuxt": "^4.5.2",
+    "nuxt-auth-utils": "^0.5.30",
+    "ofetch": "^1.5.1",
+    "pg": "^8.23.0",
+    "pinia": "^4.0.3",
     "syllable-engine": "workspace:*",
-    "vue": "^3.5.22"
+    "vue": "^3.5.22",
+    "zod": "^4.4.3"
   },
   "devDependencies": {
-    "@electron/rebuild": "^4.0.4",
     "@types/better-sqlite3": "^7.6.13",
     "@types/diff": "^7.0.2",
     "@types/node": "^24.7.2",
-    "@vitejs/plugin-vue": "^6.0.1",
-    "electron": "^38.4.0",
-    "electron-builder": "^26.0.12",
+    "@types/pg": "^8.23.1",
+    "better-sqlite3": "^12.4.6",
+    "dotenv": "^17.4.2",
+    "drizzle-kit": "^0.31.10",
+    "tsx": "^4.21.0",
     "typescript": "^5.9.3",
-    "vite": "^7.1.9",
-    "vite-plugin-electron": "^0.29.0",
-    "vite-plugin-electron-renderer": "^0.14.6",
     "vitest": "^4.0.16",
     "vue-tsc": "^3.1.1"
-  },
-  "build": {
-    "appId": "dev.lumi.ritual",
-    "productName": "Ritual",
-    "files": [
-      "dist",
-      "dist-electron"
-    ],
-    "linux": {
-      "target": [
-        "AppImage"
-      ],
-      "category": "Utility"
-    },
-    "win": {
-      "target": [
-        "nsis"
-      ]
-    }
   }
 }

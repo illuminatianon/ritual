@@ -339,8 +339,8 @@ closed      # only previously linked accounts may sign in
 Suggested environment configuration:
 
 ```dotenv
-RITUAL_AUTH_MODE=allowlist
-RITUAL_ALLOWED_EMAILS=user@example.com
+NUXT_RITUAL_AUTH_MODE=allowlist
+NUXT_RITUAL_ALLOWED_EMAILS=user@example.com
 ```
 
 The exact environment → Nuxt runtime config wiring may follow Nuxt conventions, but the behavior above should exist.
@@ -945,8 +945,8 @@ NUXT_OAUTH_GOOGLE_CLIENT_ID=...
 NUXT_OAUTH_GOOGLE_CLIENT_SECRET=...
 NUXT_OAUTH_GOOGLE_REDIRECT_URL=https://ritual.example.com/auth/google
 
-RITUAL_AUTH_MODE=allowlist
-RITUAL_ALLOWED_EMAILS=user@example.com
+NUXT_RITUAL_AUTH_MODE=allowlist
+NUXT_RITUAL_ALLOWED_EMAILS=user@example.com
 ```
 
 Do not commit real values.

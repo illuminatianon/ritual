@@ -3,8 +3,8 @@ node_modules/
 
 # Build output
 dist/
-dist-electron/
-release/
+.output/
+.nuxt/
 
 # Logs
 *.log
@@ -29,10 +29,9 @@ Thumbs.db
 # TypeScript
 *.tsbuildinfo
 
-# Electron
-out/
-*.asar
 
 .claude/*
 
 repomix-output.xml
+
+.output/**/*
