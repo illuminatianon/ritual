@@ -40,6 +40,8 @@ NUXT_RITUAL_ALLOWED_EMAILS=user@example.com
 
 Registration modes are `allowlist` (the default), `open`, and `closed`. OAuth access and refresh tokens are not stored.
 
+For local HTTP development, use `pnpm dev` and the same origin consistently—`http://localhost:3000` in the provided example. Do not set `NODE_ENV=production` in local `.env`: OAuth state cookies are intentionally `Secure` in production and require HTTPS. A production deployment must use the public HTTPS callback URL and forwarded HTTPS proxy headers.
+
 ## Existing SQLite data
 
 Sign in once with the target Google account, migrate PostgreSQL, then import a copy of the Electron SQLite database:
