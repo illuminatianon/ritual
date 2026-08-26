@@ -14,7 +14,8 @@
     "db:generate": "drizzle-kit generate",
     "db:migrate": "drizzle-kit migrate",
     "db:studio": "drizzle-kit studio",
-    "import:sqlite": "tsx scripts/import-electron-sqlite.ts"
+    "import:sqlite": "tsx scripts/import-electron-sqlite.ts",
+    "import:styler": "tsx scripts/import-styler-sqlite.ts"
   },
   "keywords": [],
   "author": "",

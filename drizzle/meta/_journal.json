@@ -16,5 +16,12 @@
       "tag": "0001_styles",
       "breakpoints": true
     }
+    ,{
+      "idx": 2,
+      "version": "7",
+      "when": 1787629739549,
+      "tag": "0002_style_import_ledger",
+      "breakpoints": true
+    }
   ]
 }
