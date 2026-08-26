@@ -14,6 +14,27 @@ export const versionUpdateSchema = z.object({
   lyrics: z.string(),
 });
 
+
+const styleMetadataSchema = z.record(z.string(), z.unknown()).optional();
+
+export const styleCreateSchema = z.object({
+  name: z.string().trim().min(1).max(120),
+  positive_prompt: z.string().trim().min(1).max(1_000),
+  negative_prompt: z.string().trim().max(1_000).optional().default(''),
+  metadata: styleMetadataSchema,
+});
+
+export const styleVersionCreateSchema = styleCreateSchema;
+
+export const styleGenerateSchema = z.object({
+  request: z.string().trim().min(1).max(2_000),
+});
+
+export const styleRefineSchema = z.object({
+  positive_prompt: z.string().trim().min(1).max(1_000),
+  negative_prompt: z.string().trim().max(1_000).optional().default(''),
+  instruction: z.string().trim().min(1).max(2_000),
+});
 const uuidSchema = z.uuid();
 
 export function parseUuidParam(event: Parameters<typeof getRouterParam>[0], name: string) {

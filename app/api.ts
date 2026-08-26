@@ -17,4 +17,11 @@ export const api: Api = {
     load: (versionId) => $fetch(`/api/versions/${versionId}`),
     delete: async (versionId) => { await $fetch(`/api/versions/${versionId}`, { method: 'DELETE' }); },
   },
+  styles: {
+    list: () => $fetch('/api/styles'),
+    create: (args) => $fetch('/api/styles', { method: 'POST', body: args }),
+    get: (styleId) => $fetch(`/api/styles/${styleId}`),
+    appendVersion: ({ styleId, ...body }) => $fetch(`/api/styles/${styleId}/versions`, { method: 'POST', body }),
+    delete: async (styleId) => { await $fetch(`/api/styles/${styleId}`, { method: 'DELETE' }); },
+  },
 };

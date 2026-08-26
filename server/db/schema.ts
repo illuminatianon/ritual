@@ -40,3 +40,26 @@ export const versions = pgTable('versions', {
   label: text('label'),
   ...timestamps,
 }, (table) => [unique('versions_song_version_number_unique').on(table.songId, table.versionNumber)]);
+
+export const styles = pgTable('styles', {
+  id: uuid('id').primaryKey(),
+  userId: uuid('user_id').notNull().references(() => users.id, { onDelete: 'cascade' }),
+  name: text('name').notNull(),
+  currentVersionId: uuid('current_version_id'),
+  nextVersionNumber: integer('next_version_number').notNull().default(2),
+  ...timestamps,
+  deletedAt: timestamp('deleted_at', { withTimezone: true }),
+}, (table) => [index('styles_user_deleted_updated_idx').on(table.userId, table.deletedAt, table.updatedAt)]);
+
+export const styleVersions = pgTable('style_versions', {
+  id: uuid('id').primaryKey(),
+  styleId: uuid('style_id').notNull().references(() => styles.id, { onDelete: 'cascade' }),
+  versionNumber: integer('version_number').notNull(),
+  positivePrompt: text('positive_prompt').notNull(),
+  negativePrompt: text('negative_prompt').notNull(),
+  metadataJson: text('metadata_json').notNull(),
+  createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+}, (table) => [
+  unique('style_versions_style_version_number_unique').on(table.styleId, table.versionNumber),
+  index('style_versions_style_version_idx').on(table.styleId, table.versionNumber),
+]);

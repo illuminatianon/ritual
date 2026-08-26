@@ -19,6 +19,31 @@ export interface Version {
   updated_at: string;
 }
 
+export interface StyleVersion {
+  id: string;
+  style_id: string;
+  version_number: number;
+  positive_prompt: string;
+  negative_prompt: string;
+  metadata_json: string;
+  created_at: string;
+}
+
+export interface Style {
+  id: string;
+  name: string;
+  current_version_id: string;
+  next_version_number: number;
+  created_at: string;
+  updated_at: string;
+  deleted_at: string | null;
+  current_version: StyleVersion;
+}
+
+export interface StyleDetail extends Style {
+  versions: StyleVersion[];
+}
+
 export interface Api {
   songs: {
     list(args?: { archived?: boolean }): Promise<Song[]>;
@@ -34,5 +59,12 @@ export interface Api {
     overwrite(args: { versionId: string; lyrics: string }): Promise<Version>;
     load(versionId: string): Promise<Version>;
     delete(versionId: string): Promise<void>;
+  };
+  styles: {
+    list(): Promise<Style[]>;
+    create(args: { name: string; positive_prompt: string; negative_prompt?: string; metadata?: Record<string, unknown> }): Promise<StyleDetail>;
+    get(styleId: string): Promise<StyleDetail>;
+    appendVersion(args: { styleId: string; name: string; positive_prompt: string; negative_prompt?: string; metadata?: Record<string, unknown> }): Promise<StyleDetail>;
+    delete(styleId: string): Promise<void>;
   };
 }
