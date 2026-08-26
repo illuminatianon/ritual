@@ -1,5 +1,7 @@
 <script setup lang="ts">
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue';
+import ActivityBar from '../workbench/ActivityBar.vue';
+import WorkbenchShell from '../workbench/WorkbenchShell.vue';
 import DiffPanel from './DiffPanel.vue';
 import EditorPane from './EditorPane.vue';
 import Sidebar from './Sidebar.vue';
@@ -374,7 +376,12 @@ function showNotice(message: string) {
 </script>
 
 <template>
-  <main class="app-shell" :class="{ 'sidebar-closed': !sidebarOpen }">
+  <WorkbenchShell :class="{ 'sidebar-closed': !sidebarOpen }">
+    <template #activity>
+      <ActivityBar active-mode="songs" @select="() => undefined" />
+    </template>
+
+    <template #primary>
     <Sidebar
       :collapsed="!sidebarOpen"
       :songs="songsStore.songs"
@@ -392,7 +399,9 @@ function showNotice(message: string) {
       @restore="(song) => restoreSong(song.id)"
       @delete-permanent="(song) => deletePermanent(song.id)"
     />
+    </template>
 
+    <template #workspace>
     <section class="workspace">
       <div class="editor-header">
         <div class="editor-title">
@@ -439,10 +448,17 @@ function showNotice(message: string) {
         <button type="button" class="primary-action" @click="createSong">New song</button>
       </div>
 
-      <StatusBar :active="activeState" />
     </section>
+    </template>
 
-    <DiffPanel :active="activeState" @load-version="loadVersion" @delete-version="deleteVersion" />
+    <template #secondary>
+      <DiffPanel :active="activeState" @load-version="loadVersion" @delete-version="deleteVersion" />
+
+    </template>
+
+    <template #status>
+      <StatusBar :active="activeState" />
+    </template>
 
     <div v-if="notice" class="toast" role="status">{{ notice }}</div>
 
@@ -479,5 +495,5 @@ function showNotice(message: string) {
         </div>
       </div>
     </div>
-  </main>
+  </WorkbenchShell>
 </template>
