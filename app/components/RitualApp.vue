@@ -12,6 +12,8 @@ import { useSongStore } from '../stores/song';
 import { useSongsStore } from '../stores/songs';
 
 const songsStore = useSongsStore();
+const route = useRoute();
+const router = useRouter();
 const songStore = useSongStore();
 const prefsStore = usePrefsStore();
 
@@ -87,9 +89,12 @@ const dialogInput = ref('');
 const dialogTextInput = ref<HTMLInputElement | null>(null);
 const notice = ref<string | null>(null);
 let noticeTimeout: number | null = null;
-
 onMounted(async () => {
   await songsStore.loadAll();
+  const routeSongId = route.params.songId;
+  if (typeof routeSongId === 'string' && songsStore.songs.some((song) => song.id === routeSongId)) {
+    songsStore.setActive(routeSongId);
+  }
   if (songsStore.activeSongId != null) {
     await songStore.open(songsStore.activeSongId);
   }
@@ -112,6 +117,12 @@ watch(
   },
 );
 
+watch(() => route.params.songId, (songId) => {
+  if (typeof songId === 'string' && songsStore.songs.some((song) => song.id === songId) && songId !== songsStore.activeSongId) {
+    songsStore.setActive(songId);
+  }
+});
+
 watch(appTitle, (title) => {
   document.title = title;
 }, { immediate: true });
@@ -122,6 +133,7 @@ async function createSong() {
   }
   const song = await songsStore.create('Untitled Song');
   await songStore.open(song.id);
+  await router.push(`/songs/${song.id}`);
 }
 
 async function selectSong(songId: string) {
@@ -130,6 +142,7 @@ async function selectSong(songId: string) {
   }
   if (await confirmDirtyTransition()) {
     songsStore.setActive(songId);
+    await router.push(`/songs/${songId}`);
   }
 }
 
@@ -378,9 +391,8 @@ function showNotice(message: string) {
 <template>
   <WorkbenchShell :class="{ 'sidebar-closed': !sidebarOpen }">
     <template #activity>
-      <ActivityBar active-mode="songs" @select="() => undefined" />
+      <ActivityBar active-mode="songs" @select="(mode) => router.push(mode === 'songs' ? '/songs' : '/styles')" />
     </template>
-
     <template #primary>
     <Sidebar
       :collapsed="!sidebarOpen"

@@ -1,6 +1,6 @@
 <script setup lang="ts">
-defineProps<{ activeMode: 'songs' }>();
-defineEmits<{ select: [mode: 'songs'] }>();
+defineProps<{ activeMode: 'songs' | 'styles' }>();
+defineEmits<{ select: [mode: 'songs' | 'styles'] }>();
 </script>
 
 <template>
@@ -14,6 +14,16 @@ defineEmits<{ select: [mode: 'songs'] }>();
       @click="$emit('select', 'songs')"
     >
       ♪<span>Songs</span>
+    </button>
+    <button
+      class="activity-item"
+      :class="{ active: activeMode === 'styles' }"
+      type="button"
+      aria-label="Styles"
+      title="Styles"
+      @click="$emit('select', 'styles')"
+    >
+      ✦<span>Styles</span>
     </button>
   </nav>
 </template>

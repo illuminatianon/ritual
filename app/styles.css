@@ -715,3 +715,43 @@ small,
   box-shadow: 0 16px 44px rgba(0, 0, 0, 0.35);
   font-size: 0.9rem;
 }
+
+.style-prompts {
+  display: grid;
+  gap: 1px;
+  overflow: auto;
+  background: #292b30;
+}
+
+.style-prompts section {
+  padding: 24px;
+  background: #15171b;
+}
+
+.style-prompts p:not(.eyebrow) {
+  margin: 16px 0 0;
+  color: #e6e3df;
+  white-space: pre-wrap;
+  line-height: 1.65;
+}
+
+.prompt-heading {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.style-dialog label {
+  display: grid;
+  gap: 6px;
+  color: #d8d0c5;
+}
+
+.style-dialog textarea {
+  min-height: 96px;
+  resize: vertical;
+  border: 1px solid #3a3c42;
+  background: #111214;
+  color: #f2eee7;
+  padding: .6rem;
+}

@@ -1,0 +1,6 @@
+<script setup lang="ts">
+import type { StyleVersion } from '../../shared/types/api';
+defineProps<{ name: string | null; version: StyleVersion | null }>();
+defineEmits<{ create: []; edit: []; remove: []; copy: [text: string] }>();
+</script>
+<template><section class="workspace"><div class="editor-header"><div class="editor-title"><span class="song-name">{{ name ?? 'No style selected' }}</span><span v-if="version" class="version-chip">v{{ version.version_number }}</span></div><div v-if="version" class="editor-actions"><button class="primary-action" type="button" @click="$emit('edit')">New Version</button><button type="button" @click="$emit('remove')">Delete</button></div></div><div v-if="version" class="style-prompts"><section><div class="prompt-heading"><p class="eyebrow">Positive prompt</p><button type="button" @click="$emit('copy', version.positive_prompt)">Copy</button></div><p>{{ version.positive_prompt }}</p></section><section><div class="prompt-heading"><p class="eyebrow">Negative prompt</p><button type="button" @click="$emit('copy', version.negative_prompt)">Copy</button></div><p>{{ version.negative_prompt || 'None' }}</p></section></div><div v-else class="empty-editor"><h2>Create a style to start.</h2><button class="primary-action" type="button" @click="$emit('create')">New style</button></div></section></template>
