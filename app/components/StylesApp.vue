@@ -7,6 +7,7 @@ import StyleHistoryPanel from '../styles/StyleHistoryPanel.vue';
 import StyleLibrary from '../styles/StyleLibrary.vue';
 import StyleWorkspace from '../styles/StyleWorkspace.vue';
 import { useStylesStore } from '../stores/styles';
+import { api } from '../api';
 
 const stylesStore = useStylesStore();
 const route = useRoute();
@@ -14,7 +15,7 @@ const router = useRouter();
 const selectedVersionId = ref<string | null>(null);
 const dialogOpen = ref(false);
 const editing = ref(false);
-const form = ref({ name: '', positive_prompt: '', negative_prompt: '', source: 'manual' });
+const form = ref({ name: '', positive_prompt: '', negative_prompt: '', source: 'manual', instruction: '' });
 const notice = ref<string | null>(null);
 const active = computed(() => stylesStore.activeStyle);
 const selectedVersion = computed(() => active.value?.versions.find((version) => version.id === selectedVersionId.value) ?? active.value?.current_version ?? null);
@@ -25,12 +26,14 @@ async function openFromRoute() {
 }
 onMounted(async () => { await stylesStore.load(); await openFromRoute(); });
 watch(() => route.params.styleId, () => { void openFromRoute(); });
-function showCreate() { editing.value = false; form.value = { name: '', positive_prompt: '', negative_prompt: '', source: 'manual' }; dialogOpen.value = true; }
-function showEdit() { if (!active.value || !selectedVersion.value) return; editing.value = true; form.value = { name: active.value.name, positive_prompt: selectedVersion.value.positive_prompt, negative_prompt: selectedVersion.value.negative_prompt, source: 'manual' }; dialogOpen.value = true; }
-function showImport() { const input = window.prompt('Paste comma-delimited terms; prefix exclusions with a dash.'); if (input == null) return; editing.value = false; form.value = { ...parseCombinedPrompt(input), source: 'import' }; dialogOpen.value = true; }
+function showCreate() { editing.value = false; form.value = { name: '', positive_prompt: '', negative_prompt: '', source: 'manual', instruction: '' }; dialogOpen.value = true; }
+function showEdit() { if (!active.value || !selectedVersion.value) return; editing.value = true; form.value = { name: active.value.name, positive_prompt: selectedVersion.value.positive_prompt, negative_prompt: selectedVersion.value.negative_prompt, source: 'manual', instruction: '' }; dialogOpen.value = true; }
+function showImport() { const input = window.prompt('Paste comma-delimited terms; prefix exclusions with a dash.'); if (input == null) return; editing.value = false; form.value = { ...parseCombinedPrompt(input), source: 'import', instruction: '' }; dialogOpen.value = true; }
+async function generate() { const request = window.prompt('Describe the sound direction.'); if (!request) return; try { const candidate = await api.styleModel.generate(request); editing.value = false; form.value = { name: candidate.positive_prompt.slice(0, 60), ...candidate, source: 'generated', instruction: '' }; dialogOpen.value = true; } catch { notify('Could not generate a style prompt.'); } }
+async function refine() { if (!active.value || !selectedVersion.value) return; const instruction = window.prompt('Describe the refinement.'); if (!instruction) return; try { const candidate = await api.styleModel.refine({ positive_prompt: selectedVersion.value.positive_prompt, negative_prompt: selectedVersion.value.negative_prompt, instruction }); editing.value = true; form.value = { name: active.value.name, ...candidate, source: 'model-edit', instruction }; dialogOpen.value = true; } catch { notify('Could not refine the style prompt.'); } }
 async function save() {
   try {
-    const payload = { name: form.value.name, positive_prompt: form.value.positive_prompt, negative_prompt: form.value.negative_prompt, metadata: { source: form.value.source } };
+    const payload = { name: form.value.name, positive_prompt: form.value.positive_prompt, negative_prompt: form.value.negative_prompt, metadata: { source: form.value.source, ...(form.value.instruction ? { instruction: form.value.instruction } : {}) } };
     const detail = editing.value && active.value ? await stylesStore.append({ styleId: active.value.id, ...payload }) : await stylesStore.create(payload);
     selectedVersionId.value = detail.current_version_id; dialogOpen.value = false; await router.push(`/styles/${detail.id}`); notify(editing.value ? `Saved v${detail.current_version.version_number}` : 'Style created');
   } catch { notify('Could not save style. Check all required fields.'); }
@@ -45,7 +48,7 @@ function switchMode(mode: 'songs' | 'styles') { void router.push(mode === 'songs
   <WorkbenchShell>
     <template #activity><ActivityBar active-mode="styles" @select="switchMode" /></template>
     <template #primary><StyleLibrary :styles="stylesStore.styles" :active-id="active?.id ?? null" :loading="stylesStore.loading" @create="showCreate" @select="select" /></template>
-    <template #workspace><StyleWorkspace :name="active?.name ?? null" :version="selectedVersion" @create="showCreate" @edit="showEdit" @remove="remove" @import="showImport" @copy="copy" /></template>
+    <template #workspace><StyleWorkspace :name="active?.name ?? null" :version="selectedVersion" @create="showCreate" @edit="showEdit" @remove="remove" @import="showImport" @generate="generate" @refine="refine" @copy="copy" /></template>
     <template #secondary><StyleHistoryPanel :versions="active?.versions ?? []" :selected-id="selectedVersion?.id ?? null" @select="selectedVersionId = $event" /></template>
     <template #status><footer class="status-bar"><span>{{ selectedVersion ? `Version ${selectedVersion.version_number}` : 'No style selected' }}</span></footer></template>
     <div v-if="notice" class="toast" role="status">{{ notice }}</div>
