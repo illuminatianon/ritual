@@ -8,6 +8,10 @@ export default defineNuxtConfig({
   runtimeConfig: {
     ritualAuthMode: 'allowlist',
     ritualAllowedEmails: '',
+    openrouterApiKey: '',
+    openrouterModel: 'openai/gpt-4o-mini',
+    openrouterSiteUrl: '',
+    openrouterAppName: 'Ritual',
   },
   typescript: {
     strict: true,

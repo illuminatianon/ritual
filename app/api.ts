@@ -24,4 +24,8 @@ export const api: Api = {
     appendVersion: ({ styleId, ...body }) => $fetch(`/api/styles/${styleId}/versions`, { method: 'POST', body }),
     delete: async (styleId) => { await $fetch(`/api/styles/${styleId}`, { method: 'DELETE' }); },
   },
+  styleModel: {
+    generate: (request) => $fetch('/api/styles/generate', { method: 'POST', body: { request } }),
+    refine: (args) => $fetch('/api/styles/refine', { method: 'POST', body: args }),
+  },
 };

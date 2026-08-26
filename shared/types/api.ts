@@ -67,4 +67,8 @@ export interface Api {
     appendVersion(args: { styleId: string; name: string; positive_prompt: string; negative_prompt?: string; metadata?: Record<string, unknown> }): Promise<StyleDetail>;
     delete(styleId: string): Promise<void>;
   };
+  styleModel: {
+    generate(request: string): Promise<{ positive_prompt: string; negative_prompt: string }>;
+    refine(args: { positive_prompt: string; negative_prompt?: string; instruction: string }): Promise<{ positive_prompt: string; negative_prompt: string }>;
+  };
 }
