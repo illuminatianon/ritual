@@ -1,0 +1,2147 @@
+This file is a merged representation of the entire codebase, combined into a single document by Repomix.
+
+<file_summary>
+This section contains a summary of this file.
+
+<purpose>
+This file contains a packed representation of the entire repository's contents.
+It is designed to be easily consumable by AI systems for analysis, code review,
+or other automated processes.
+</purpose>
+
+<file_format>
+The content is organized as follows:
+1. This summary section
+2. Repository information
+3. Directory structure
+4. Repository files (if enabled)
+4. Repository files, each consisting of:
+  - File path as an attribute
+  - Full contents of the file
+</file_format>
+
+<usage_guidelines>
+- This file should be treated as read-only. Any changes should be made to the
+  original repository files, not this packed version.
+- When processing this file, use the file path to distinguish
+  between different files in the repository.
+- Be aware that this file may contain sensitive information. Handle it with
+  the same level of security as you would the original repository.
+</usage_guidelines>
+
+<notes>
+- Some files may have been excluded based on .gitignore rules and Repomix's configuration
+- Binary files are not included in this packed representation. Please refer to the Repository Structure section for a complete list of file paths, including binary files
+- Files matching patterns in .gitignore are excluded
+- Files matching default ignore patterns are excluded
+- Files are sorted by Git change count (files with more changes are at the bottom)
+</notes>
+
+<additional_info>
+
+</additional_info>
+
+</file_summary>
+
+<directory_structure>
+server/
+  index.ts
+  tsconfig.json
+src/
+  App.vue
+  env.d.ts
+  main.ts
+  styles.css
+.env.example
+.gitignore
+.repomixignore
+AGENTS.md
+index.html
+MIGRATION_DESIGN.md
+package.json
+pnpm-workspace.yaml
+repomix.config.json
+suno-prompting.md
+tsconfig.app.json
+tsconfig.json
+tsconfig.node.json
+vite.config.ts
+</directory_structure>
+
+<files>
+This section contains the contents of the repository's files.
+
+<file path="server/index.ts">
+import 'dotenv/config'
+import Database from 'better-sqlite3'
+import express, { type NextFunction, type Request, type Response } from 'express'
+import { mkdirSync } from 'node:fs'
+import path from 'node:path'
+import { fileURLToPath } from 'node:url'
+
+const __dirname = path.dirname(fileURLToPath(import.meta.url))
+const dataDirectory = path.resolve(__dirname, '../data')
+mkdirSync(dataDirectory, { recursive: true })
+const db = new Database(path.join(dataDirectory, 'styler.db'))
+db.pragma('journal_mode = WAL')
+db.pragma('foreign_keys = ON')
+
+db.exec(`
+  CREATE TABLE IF NOT EXISTS styles (
+    id INTEGER PRIMARY KEY,
+    name TEXT NOT NULL,
+    current_version_id INTEGER,
+    created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    deleted_at TEXT
+  );
+  CREATE TABLE IF NOT EXISTS style_versions (
+    id INTEGER PRIMARY KEY,
+    style_id INTEGER NOT NULL REFERENCES styles(id),
+    version_number INTEGER NOT NULL,
+    positive_prompt TEXT NOT NULL,
+    negative_prompt TEXT NOT NULL,
+    metadata_json TEXT NOT NULL DEFAULT '{}',
+    created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    UNIQUE(style_id, version_number)
+  );
+  CREATE INDEX IF NOT EXISTS styles_active_updated_idx ON styles(deleted_at, updated_at DESC);
+  CREATE INDEX IF NOT EXISTS style_versions_style_idx ON style_versions(style_id, version_number DESC);
+`)
+
+type StyleInput = {
+  name?: unknown
+  positivePrompt?: unknown
+  negativePrompt?: unknown
+  metadata?: unknown
+  source?: unknown
+}
+
+const MAX_POSITIVE_LENGTH = 1000
+const MAX_NEGATIVE_LENGTH = 1000
+
+function requireText(value: unknown, field: string, maxLength: number) {
+  if (typeof value !== 'string' || !value.trim()) throw new Error(`${field} is required.`)
+  const text = value.trim()
+  if (text.length > maxLength) throw new Error(`${field} must be ${maxLength} characters or fewer.`)
+  return text
+}
+
+function normalizeInput(input: StyleInput) {
+  const name = requireText(input.name, 'Name', 120)
+  const positivePrompt = requireText(input.positivePrompt, 'Positive prompt', MAX_POSITIVE_LENGTH)
+  const negativePrompt = typeof input.negativePrompt === 'string' ? input.negativePrompt.trim() : ''
+  if (negativePrompt.length > MAX_NEGATIVE_LENGTH) {
+    throw new Error(`Negative prompt must be ${MAX_NEGATIVE_LENGTH} characters or fewer.`)
+  }
+  const metadata = {
+    source: typeof input.source === 'string' ? input.source : 'manual',
+    ...(input.metadata && typeof input.metadata === 'object' && !Array.isArray(input.metadata) ? input.metadata : {}),
+  }
+  return { name, positivePrompt, negativePrompt, metadata: JSON.stringify(metadata) }
+}
+
+function styleSummary(id: number) {
+  return db.prepare(`
+    SELECT s.id, s.name, s.current_version_id AS currentVersionId, s.created_at AS createdAt,
+      s.updated_at AS updatedAt, sv.version_number AS versionNumber,
+      sv.positive_prompt AS positivePrompt, sv.negative_prompt AS negativePrompt,
+      sv.metadata_json AS metadataJson, sv.created_at AS versionCreatedAt
+    FROM styles s
+    JOIN style_versions sv ON sv.id = s.current_version_id
+    WHERE s.id = ? AND s.deleted_at IS NULL
+  `).get(id)
+}
+
+const insertStyle = db.prepare('INSERT INTO styles (name) VALUES (?)')
+const insertVersion = db.prepare(`
+  INSERT INTO style_versions (style_id, version_number, positive_prompt, negative_prompt, metadata_json)
+  VALUES (?, ?, ?, ?, ?)
+`)
+const setCurrentVersion = db.prepare(`
+  UPDATE styles SET current_version_id = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?
+`)
+
+function createStyle(input: StyleInput) {
+  const values = normalizeInput(input)
+  return db.transaction(() => {
+    const styleId = Number(insertStyle.run(values.name).lastInsertRowid)
+    const versionId = Number(insertVersion.run(styleId, 1, values.positivePrompt, values.negativePrompt, values.metadata).lastInsertRowid)
+    setCurrentVersion.run(versionId, styleId)
+    return styleSummary(styleId)
+  })()
+}
+
+function createVersion(styleId: number, input: StyleInput) {
+  const values = normalizeInput(input)
+  return db.transaction(() => {
+    const style = db.prepare('SELECT id FROM styles WHERE id = ? AND deleted_at IS NULL').get(styleId)
+    if (!style) throw new Error('Style not found.')
+    const nextVersionStatement = db.prepare<[number], { version: number }>('SELECT COALESCE(MAX(version_number), 0) + 1 AS version FROM style_versions WHERE style_id = ?')
+    const nextVersionResult = nextVersionStatement.get(styleId)
+    if (!nextVersionResult) throw new Error('Could not allocate a style version.')
+    const nextVersion = nextVersionResult.version
+    const versionId = Number(insertVersion.run(styleId, nextVersion, values.positivePrompt, values.negativePrompt, values.metadata).lastInsertRowid)
+    db.prepare('UPDATE styles SET name = ?, current_version_id = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?').run(values.name, versionId, styleId)
+    return styleSummary(styleId)
+  })()
+}
+
+function parseGeneratedPrompts(content: string) {
+  const match = content.match(/STYLE\s*PROMPT\s*:\s*([\s\S]*?)\s*NEGATIVE\s*PROMPT\s*:\s*([\s\S]*)/i)
+  if (!match) throw new Error('The model returned an unexpected format. Please reroll.')
+  const positivePrompt = match[1].trim().replace(/^```[\w-]*|```$/g, '').trim()
+  const negativePrompt = match[2].trim().replace(/^```[\w-]*|```$/g, '').trim()
+  if (!positivePrompt || positivePrompt.length > MAX_POSITIVE_LENGTH || negativePrompt.length > MAX_NEGATIVE_LENGTH) {
+    throw new Error('The generated prompts exceeded the allowed length. Please reroll.')
+  }
+  return { positivePrompt, negativePrompt }
+}
+
+const STYLE_PROMPT_GUIDANCE = `Create original Suno v5.5 style prompts. Keep the Style Prompt and Negative Prompt separate. Style prompts must be 250–700 characters and never exceed ${MAX_POSITIVE_LENGTH}; front-load genre and mood, then vocal delivery, instrumentation, tempo/key, arrangement, production, and mix. Use concise natural phrases. Negative prompts should be concise, specific exclusions and never exceed ${MAX_NEGATIVE_LENGTH}. Never include artists, bands, songs, albums, copyrighted lyrics, voice imitation, or phrases such as "in the style of". Translate references into neutral musical traits. Keep the result original and non-contradictory.`
+
+type OpenRouterPayload = {
+  choices?: Array<{ message?: { content?: string } }>
+  error?: { message?: string }
+}
+
+async function requestStylePrompts(systemInstruction: string, request: string) {
+  const apiKey = process.env.OPENROUTER_API_KEY
+  if (!apiKey) throw new Error('OPENROUTER_API_KEY is not configured in .env.')
+
+  const response = await fetch('https://openrouter.ai/api/v1/chat/completions', {
+    method: 'POST',
+    signal: AbortSignal.timeout(45_000),
+    headers: {
+      Authorization: `Bearer ${apiKey}`,
+      'Content-Type': 'application/json',
+      ...(process.env.OPENROUTER_SITE_URL ? { 'HTTP-Referer': process.env.OPENROUTER_SITE_URL } : {}),
+      ...(process.env.OPENROUTER_APP_NAME ? { 'X-Title': process.env.OPENROUTER_APP_NAME } : {}),
+    },
+    body: JSON.stringify({
+      model: process.env.OPENROUTER_MODEL ?? 'deepseek/deepseek-v4-pro',
+      temperature: 0.9,
+      messages: [
+        { role: 'system', content: `${systemInstruction}\n\n${STYLE_PROMPT_GUIDANCE}\n\nReturn exactly two labeled fields and no commentary:\nSTYLE PROMPT: <positive prompt>\nNEGATIVE PROMPT: <negative prompt>` },
+        { role: 'user', content: request },
+      ],
+    }),
+  })
+
+  const payload: OpenRouterPayload = await response.json()
+  if (!response.ok) throw new Error(payload.error?.message ?? 'OpenRouter request failed.')
+  const content = payload.choices?.[0]?.message?.content
+  if (!content) throw new Error('OpenRouter returned no generated prompt.')
+  return parseGeneratedPrompts(content)
+}
+
+const app = express()
+app.use(express.json({ limit: '64kb' }))
+
+app.get('/api/health', (_req, res) => res.json({ ok: true }))
+
+app.get('/api/styles', (_req, res) => {
+  const styles = db.prepare(`
+    SELECT s.id, s.name, s.current_version_id AS currentVersionId, s.created_at AS createdAt,
+      s.updated_at AS updatedAt, sv.version_number AS versionNumber,
+      sv.positive_prompt AS positivePrompt, sv.negative_prompt AS negativePrompt,
+      sv.metadata_json AS metadataJson, sv.created_at AS versionCreatedAt
+    FROM styles s
+    JOIN style_versions sv ON sv.id = s.current_version_id
+    WHERE s.deleted_at IS NULL
+    ORDER BY s.updated_at DESC, s.id DESC
+  `).all()
+  res.json(styles)
+})
+
+app.get('/api/styles/:id', (req, res) => {
+  const id = Number(req.params.id)
+  const style = styleSummary(id)
+  if (!style) return res.status(404).json({ error: 'Style not found.' })
+  const versions = db.prepare(`
+    SELECT id, version_number AS versionNumber, positive_prompt AS positivePrompt,
+      negative_prompt AS negativePrompt, metadata_json AS metadataJson, created_at AS createdAt
+    FROM style_versions WHERE style_id = ? ORDER BY version_number DESC
+  `).all(id)
+  res.json({ ...style, versions })
+})
+
+app.post('/api/styles', (req, res) => res.status(201).json(createStyle(req.body)))
+
+app.post('/api/styles/:id/versions', (req, res) => {
+  const style = createVersion(Number(req.params.id), req.body)
+  res.status(201).json(style)
+})
+
+app.delete('/api/styles/:id', (req, res) => {
+  const result = db.prepare(`
+    UPDATE styles SET deleted_at = CURRENT_TIMESTAMP, updated_at = CURRENT_TIMESTAMP
+    WHERE id = ? AND deleted_at IS NULL
+  `).run(Number(req.params.id))
+  if (!result.changes) return res.status(404).json({ error: 'Style not found.' })
+  res.status(204).end()
+})
+
+app.post('/api/generate', async (req, res) => {
+  const request = requireText(req.body?.request, 'Style request', 2000)
+  const prompts = await requestStylePrompts('You create a new style prompt from the user’s requested sound.', request)
+  res.json(prompts)
+})
+
+app.post('/api/edit-style', async (req, res) => {
+  const instruction = requireText(req.body?.instruction, 'Edit request', 2000)
+  const positivePrompt = requireText(req.body?.positivePrompt, 'Positive prompt', MAX_POSITIVE_LENGTH)
+  const negativePrompt = typeof req.body?.negativePrompt === 'string' ? req.body.negativePrompt.trim() : ''
+  if (negativePrompt.length > MAX_NEGATIVE_LENGTH) {
+    throw new Error(`Negative prompt must be ${MAX_NEGATIVE_LENGTH} characters or fewer.`)
+  }
+
+  const prompts = await requestStylePrompts(
+    'You revise an existing Suno style prompt. Apply the requested change while preserving compatible useful direction from the current prompts. If the current prompt or edit request names an artist, band, song, album, or voice, remove that reference and express only neutral musical traits. Do not mention that you removed or cannot use a reference.',
+    `CURRENT STYLE PROMPT:\n${positivePrompt}\n\nCURRENT NEGATIVE PROMPT:\n${negativePrompt || '(none)'}\n\nEDIT REQUEST:\n${instruction}`,
+  )
+  res.json(prompts)
+})
+
+app.use(express.static(path.resolve(__dirname, '../dist')))
+app.get(/^(?!\/api).*/, (_req, res) => res.sendFile(path.resolve(__dirname, '../dist/index.html')))
+
+app.use((error: unknown, _req: Request, res: Response, _next: NextFunction) => {
+  console.error(error)
+  const message = error instanceof Error ? error.message : 'Unexpected server error.'
+  res.status(message === 'Style not found.' ? 404 : 400).json({ error: message })
+})
+
+const port = Number(process.env.PORT ?? 5174)
+app.listen(port, () => console.log(`Styler API listening on http://localhost:${port}`))
+</file>
+
+<file path="server/tsconfig.json">
+{
+  "compilerOptions": {
+    "target": "ES2022",
+    "module": "NodeNext",
+    "moduleResolution": "NodeNext",
+    "strict": true,
+    "esModuleInterop": true,
+    "skipLibCheck": true,
+    "noEmit": true,
+    "types": ["node"]
+  },
+  "include": ["./**/*.ts"]
+}
+</file>
+
+<file path="src/App.vue">
+<script setup lang="ts">
+import { computed, onMounted, ref } from 'vue'
+
+type StyleSummary = {
+  id: number
+  name: string
+  currentVersionId: number
+  createdAt: string
+  updatedAt: string
+  versionNumber: number
+  positivePrompt: string
+  negativePrompt: string
+  metadataJson: string
+  versionCreatedAt: string
+}
+
+type StyleVersion = {
+  id: number
+  versionNumber: number
+  positivePrompt: string
+  negativePrompt: string
+  metadataJson: string
+  createdAt: string
+}
+
+type StyleDetail = StyleSummary & { versions: StyleVersion[] }
+type PromptDraft = { name: string; positivePrompt: string; negativePrompt: string; source: string }
+type GeneratedPrompt = { positivePrompt: string; negativePrompt: string; request: string }
+
+const MAX_POSITIVE = 1000
+const MAX_NEGATIVE = 1000
+const styles = ref<StyleSummary[]>([])
+const selectedId = ref<number | null>(null)
+const selectedStyle = ref<StyleDetail | null>(null)
+const selectedVersionId = ref<number | null>(null)
+const loading = ref(true)
+const saving = ref(false)
+const error = ref('')
+const snackbar = ref(false)
+const snackbarText = ref('')
+
+const importDialog = ref(false)
+const importText = ref('')
+const importName = ref('')
+const importResult = ref<{ positivePrompt: string; negativePrompt: string } | null>(null)
+
+const editorDialog = ref(false)
+const editorMode = ref<'new' | 'version'>('new')
+const draft = ref<PromptDraft>(emptyDraft())
+
+const generateDialog = ref(false)
+const generationRequest = ref('')
+const generating = ref(false)
+const generatedHistory = ref<GeneratedPrompt[]>([])
+
+const modelEditDialog = ref(false)
+const modelEditInstruction = ref('')
+const editingWithModel = ref(false)
+const savingModelEdit = ref(false)
+const modelEditHistory = ref<GeneratedPrompt[]>([])
+
+const activeVersion = computed(() =>
+  selectedStyle.value?.versions.find((version) => version.id === selectedVersionId.value) ?? selectedStyle.value?.versions[0] ?? null,
+)
+
+const versionChoices = computed(() =>
+  selectedStyle.value?.versions.map((version) => ({
+    title: `Version ${version.versionNumber} · ${formatDate(version.createdAt)}`,
+    value: version.id,
+  })) ?? [],
+)
+
+function emptyDraft(): PromptDraft {
+  return { name: '', positivePrompt: '', negativePrompt: '', source: 'manual' }
+}
+
+function formatDate(value: string) {
+  return new Intl.DateTimeFormat(undefined, { month: 'short', day: 'numeric', year: 'numeric', hour: 'numeric', minute: '2-digit' }).format(new Date(`${value}Z`))
+}
+
+function metadataFor(version: StyleVersion | StyleSummary | null) {
+  if (!version) return 'manual'
+  try {
+    return (JSON.parse(version.metadataJson) as { source?: string }).source ?? 'manual'
+  } catch {
+    return 'manual'
+  }
+}
+
+function tell(message: string) {
+  snackbarText.value = message
+  snackbar.value = true
+}
+
+async function api<T>(url: string, options?: RequestInit): Promise<T> {
+  const response = await fetch(url, {
+    headers: { 'Content-Type': 'application/json', ...(options?.headers ?? {}) },
+    ...options,
+  })
+  if (!response.ok) {
+    const payload = await response.json().catch(() => ({ error: 'Request failed.' })) as { error?: string }
+    throw new Error(payload.error ?? 'Request failed.')
+  }
+  return response.status === 204 ? (undefined as T) : response.json() as Promise<T>
+}
+
+async function loadStyles(selectFirst = false) {
+  styles.value = await api<StyleSummary[]>('/api/styles')
+  if (selectFirst && styles.value.length) await selectStyle(styles.value[0].id)
+}
+
+async function selectStyle(id: number) {
+  error.value = ''
+  selectedId.value = id
+  try {
+    const detail = await api<StyleDetail>(`/api/styles/${id}`)
+    selectedStyle.value = detail
+    selectedVersionId.value = detail.currentVersionId
+  } catch (caught) {
+    error.value = caught instanceof Error ? caught.message : 'Could not load style.'
+  }
+}
+
+function openNewStyle() {
+  editorMode.value = 'new'
+  draft.value = emptyDraft()
+  editorDialog.value = true
+}
+
+function openImport() {
+  importResult.value = null
+  importDialog.value = true
+}
+
+function cancelImport() {
+  importText.value = ''
+  importName.value = ''
+  importResult.value = null
+  importDialog.value = false
+}
+
+function openVersionEditor() {
+  if (!selectedStyle.value || !activeVersion.value) return
+  editorMode.value = 'version'
+  draft.value = {
+    name: selectedStyle.value.name,
+    positivePrompt: activeVersion.value.positivePrompt,
+    negativePrompt: activeVersion.value.negativePrompt,
+    source: 'manual',
+  }
+  editorDialog.value = true
+}
+
+async function saveDraft() {
+  if (!draft.value.name.trim() || !draft.value.positivePrompt.trim()) {
+    error.value = 'A name and positive prompt are required.'
+    return
+  }
+  saving.value = true
+  error.value = ''
+  try {
+    const endpoint = editorMode.value === 'new' ? '/api/styles' : `/api/styles/${selectedStyle.value?.id}/versions`
+    const method = 'POST'
+    const style = await api<StyleSummary>(endpoint, { method, body: JSON.stringify(draft.value) })
+    editorDialog.value = false
+    await loadStyles()
+    await selectStyle(style.id)
+    tell(editorMode.value === 'new' ? 'Style saved.' : 'New version saved.')
+  } catch (caught) {
+    error.value = caught instanceof Error ? caught.message : 'Could not save style.'
+  } finally {
+    saving.value = false
+  }
+}
+
+function parseImport() {
+  const chunks = importText.value.split(',').map((part) => part.trim()).filter(Boolean)
+  const negative: string[] = []
+  const positive: string[] = []
+  for (const chunk of chunks) {
+    if (/^[\-‐‑‒–—]\s*/.test(chunk)) negative.push(chunk.replace(/^[\-‐‑‒–—]\s*/, '').trim())
+    else positive.push(chunk)
+  }
+  importResult.value = {
+    positivePrompt: positive.join(', '),
+    negativePrompt: negative.map((term) => `no ${term}`).join(', '),
+  }
+  if (!importName.value.trim()) importName.value = positive[0]?.slice(0, 60) ?? ''
+}
+
+async function saveImported() {
+  if (!importResult.value) return
+  draft.value = {
+    name: importName.value,
+    positivePrompt: importResult.value.positivePrompt,
+    negativePrompt: importResult.value.negativePrompt,
+    source: 'import',
+  }
+  editorMode.value = 'new'
+  importDialog.value = false
+  await saveDraft()
+}
+
+async function copy(text: string, label: string) {
+  try {
+    await navigator.clipboard.writeText(text)
+    tell(`${label} copied.`)
+  } catch {
+    tell('Clipboard access was unavailable.')
+  }
+}
+
+async function deleteCurrent() {
+  if (!selectedStyle.value || !window.confirm(`Soft-delete “${selectedStyle.value.name}”?`)) return
+  try {
+    await api<void>(`/api/styles/${selectedStyle.value.id}`, { method: 'DELETE' })
+    const removedId = selectedStyle.value.id
+    selectedStyle.value = null
+    selectedId.value = null
+    await loadStyles()
+    const next = styles.value.find((style) => style.id !== removedId)
+    if (next) await selectStyle(next.id)
+    tell('Style moved to trash.')
+  } catch (caught) {
+    error.value = caught instanceof Error ? caught.message : 'Could not delete style.'
+  }
+}
+
+async function generateStyle() {
+  if (!generationRequest.value.trim()) return
+  generating.value = true
+  error.value = ''
+  try {
+    const result = await api<{ positivePrompt: string; negativePrompt: string }>('/api/generate', {
+      method: 'POST',
+      body: JSON.stringify({ request: generationRequest.value }),
+    })
+    generatedHistory.value.unshift({ ...result, request: generationRequest.value })
+  } catch (caught) {
+    error.value = caught instanceof Error ? caught.message : 'Could not generate a style.'
+  } finally {
+    generating.value = false
+  }
+}
+
+function useGenerated(result: GeneratedPrompt) {
+  editorMode.value = 'new'
+  draft.value = { name: '', positivePrompt: result.positivePrompt, negativePrompt: result.negativePrompt, source: 'generated' }
+  generateDialog.value = false
+  editorDialog.value = true
+}
+function openModelEdit() {
+  if (!selectedStyle.value || !activeVersion.value) return
+  modelEditInstruction.value = ''
+  modelEditHistory.value = []
+  modelEditDialog.value = true
+}
+
+async function editWithModel() {
+  if (!activeVersion.value || !modelEditInstruction.value.trim()) return
+  editingWithModel.value = true
+  error.value = ''
+  try {
+    const result = await api<{ positivePrompt: string; negativePrompt: string }>('/api/edit-style', {
+      method: 'POST',
+      body: JSON.stringify({
+        instruction: modelEditInstruction.value,
+        positivePrompt: activeVersion.value.positivePrompt,
+        negativePrompt: activeVersion.value.negativePrompt,
+      }),
+    })
+    modelEditHistory.value.unshift({ ...result, request: modelEditInstruction.value })
+  } catch (caught) {
+    error.value = caught instanceof Error ? caught.message : 'Could not edit the style.'
+  } finally {
+    editingWithModel.value = false
+  }
+}
+
+async function saveModelEdit(result: GeneratedPrompt) {
+  if (!selectedStyle.value) return
+  savingModelEdit.value = true
+  error.value = ''
+  try {
+    const style = await api<StyleSummary>(`/api/styles/${selectedStyle.value.id}/versions`, {
+      method: 'POST',
+      body: JSON.stringify({
+        name: selectedStyle.value.name,
+        positivePrompt: result.positivePrompt,
+        negativePrompt: result.negativePrompt,
+        source: 'model-edit',
+        metadata: { instruction: result.request },
+      }),
+    })
+    modelEditDialog.value = false
+    await loadStyles()
+    await selectStyle(style.id)
+    tell('Model edit saved as a new version.')
+  } catch (caught) {
+    error.value = caught instanceof Error ? caught.message : 'Could not save model edit.'
+  } finally {
+    savingModelEdit.value = false
+  }
+}
+
+onMounted(async () => {
+  try {
+    await loadStyles(true)
+  } catch (caught) {
+    error.value = caught instanceof Error ? caught.message : 'Could not load your library.'
+  } finally {
+    loading.value = false
+  }
+})
+</script>
+
+<template>
+  <v-app>
+    <v-layout class="app-shell">
+      <aside class="library-pane">
+        <div class="brand-lockup">
+          <div class="brand-mark"><v-icon icon="mdi-waveform" size="21" /></div>
+          <div>
+            <div class="brand-name">Styler</div>
+            <div class="brand-caption">Suno prompt library</div>
+          </div>
+        </div>
+
+        <div class="library-actions">
+          <v-btn color="primary" prepend-icon="mdi-plus" block @click="openNewStyle">New style</v-btn>
+          <v-btn variant="text" prepend-icon="mdi-tray-arrow-down" block @click="openImport">Import prompt</v-btn>
+        </div>
+
+        <div class="library-heading">
+          <span>Styles</span>
+          <span class="style-count">{{ styles.length }}</span>
+        </div>
+
+        <div v-if="loading" class="style-list">
+          <v-skeleton-loader v-for="number in 5" :key="number" type="list-item-two-line" class="skeleton" />
+        </div>
+        <nav v-else class="style-list" aria-label="Saved styles">
+          <button
+            v-for="style in styles"
+            :key="style.id"
+            class="style-row"
+            :class="{ active: style.id === selectedId }"
+            type="button"
+            @click="selectStyle(style.id)"
+          >
+            <span class="style-row-name">{{ style.name }}</span>
+            <span class="style-row-meta">v{{ style.versionNumber }} · {{ formatDate(style.updatedAt) }}</span>
+          </button>
+          <div v-if="!styles.length" class="library-empty">No styles yet. Create one or import a prompt to start your library.</div>
+        </nav>
+
+        <div class="library-footer">
+          <v-btn variant="text" size="small" prepend-icon="mdi-sparkles" @click="generateDialog = true">Generate a style</v-btn>
+        </div>
+      </aside>
+
+      <main class="detail-pane">
+        <template v-if="selectedStyle && activeVersion">
+          <header class="detail-header">
+            <div>
+              <div class="section-label">Style</div>
+              <h1>{{ selectedStyle.name }}</h1>
+              <p>Version {{ activeVersion.versionNumber }} · {{ metadataFor(activeVersion) }} · updated {{ formatDate(activeVersion.createdAt) }}</p>
+            </div>
+            <div class="header-actions">
+              <v-select v-model="selectedVersionId" :items="versionChoices" hide-details min-width="220" aria-label="Select version" />
+              <v-btn variant="tonal" prepend-icon="mdi-pencil" @click="openVersionEditor">Edit as new version</v-btn>
+              <v-btn variant="tonal" prepend-icon="mdi-auto-fix" @click="openModelEdit">Refine with model</v-btn>
+              <v-btn icon="mdi-delete-outline" variant="text" aria-label="Delete style" @click="deleteCurrent" />
+            </div>
+          </header>
+
+          <section class="prompt-section">
+            <div class="prompt-heading">
+              <div>
+                <div class="section-label">Positive prompt</div>
+                <p>Primary direction · {{ activeVersion.positivePrompt.length }}/{{ MAX_POSITIVE }}</p>
+              </div>
+              <v-btn variant="text" prepend-icon="mdi-content-copy" @click="copy(activeVersion.positivePrompt, 'Positive prompt')">Copy</v-btn>
+            </div>
+            <div class="prompt-content positive">{{ activeVersion.positivePrompt }}</div>
+          </section>
+
+          <section class="prompt-section negative-section">
+            <div class="prompt-heading">
+              <div>
+                <div class="section-label">Negative prompt</div>
+                <p>Exclude direction · {{ activeVersion.negativePrompt.length }}/{{ MAX_NEGATIVE }}</p>
+              </div>
+              <v-btn variant="text" prepend-icon="mdi-content-copy" @click="copy(activeVersion.negativePrompt, 'Negative prompt')">Copy</v-btn>
+            </div>
+            <div class="prompt-content negative">{{ activeVersion.negativePrompt || 'No exclusions set.' }}</div>
+          </section>
+        </template>
+
+        <section v-else class="empty-detail">
+          <div class="empty-glyph"><v-icon icon="mdi-waveform" size="44" /></div>
+          <h1>Your prompt library starts here.</h1>
+          <p>Save the sound directions you reach for, then keep each refinement as a version.</p>
+          <div class="empty-actions">
+            <v-btn color="primary" prepend-icon="mdi-plus" @click="openNewStyle">Create a style</v-btn>
+            <v-btn variant="tonal" prepend-icon="mdi-sparkles" @click="generateDialog = true">Generate a style</v-btn>
+          </div>
+        </section>
+      </main>
+    </v-layout>
+
+    <v-dialog v-model="importDialog" max-width="840" scrollable>
+      <v-card class="dialog-card">
+        <v-card-title>{{ importResult ? 'Review imported prompt' : 'Import a prompt' }}</v-card-title>
+        <v-card-subtitle>{{ importResult ? 'Name it and check the split prompts before saving.' : 'Paste a combined prompt. Comma-separated terms beginning with a dash become negative exclusions.' }}</v-card-subtitle>
+        <v-card-text>
+          <template v-if="!importResult">
+            <v-textarea v-model="importText" label="Combined prompt" rows="7" hint="Import separates the prompt into editable positive and negative fields." persistent-hint />
+          </template>
+          <template v-else>
+            <v-btn size="small" variant="text" prepend-icon="mdi-arrow-left" class="mb-4" @click="importResult = null">Back to pasted prompt</v-btn>
+            <v-text-field v-model="importName" label="Style name" maxlength="120" autofocus />
+            <v-textarea v-model="importResult.positivePrompt" label="Positive prompt" :counter="MAX_POSITIVE" :maxlength="MAX_POSITIVE" rows="5" />
+            <v-textarea v-model="importResult.negativePrompt" label="Negative prompt" :counter="MAX_NEGATIVE" :maxlength="MAX_NEGATIVE" rows="4" />
+          </template>
+        </v-card-text>
+        <v-card-actions>
+          <v-btn variant="text" @click="cancelImport">Cancel</v-btn><v-spacer />
+          <v-btn v-if="!importResult" color="primary" :disabled="!importText.trim()" @click="parseImport">Import</v-btn>
+          <v-btn v-else color="primary" :disabled="!importName.trim() || importResult.positivePrompt.length > MAX_POSITIVE || importResult.negativePrompt.length > MAX_NEGATIVE" @click="saveImported">Save style</v-btn>
+        </v-card-actions>
+      </v-card>
+    </v-dialog>
+
+    <v-dialog v-model="editorDialog" max-width="800" persistent>
+      <v-card class="dialog-card">
+        <v-card-title>{{ editorMode === 'new' ? 'Create style' : `Version ${activeVersion?.versionNumber ? activeVersion.versionNumber + 1 : ''}` }}</v-card-title>
+        <v-card-subtitle>{{ editorMode === 'new' ? 'Build a reusable direction for your next Suno session.' : 'Your edit is saved as a new version; existing versions remain intact.' }}</v-card-subtitle>
+        <v-card-text>
+          <v-text-field v-model="draft.name" label="Style name" maxlength="120" autofocus />
+          <v-textarea v-model="draft.positivePrompt" label="Positive prompt" :counter="MAX_POSITIVE" :maxlength="MAX_POSITIVE" rows="5" hint="Start with the central genre and mood, then add vocals, instruments, arrangement, and mix." persistent-hint />
+          <v-textarea v-model="draft.negativePrompt" label="Negative prompt" :counter="MAX_NEGATIVE" :maxlength="MAX_NEGATIVE" rows="3" hint="Keep exclusions short and specific." persistent-hint />
+        </v-card-text>
+        <v-card-actions>
+          <v-btn variant="text" :disabled="saving" @click="editorDialog = false">Cancel</v-btn><v-spacer />
+          <v-btn color="primary" :loading="saving" :disabled="draft.positivePrompt.length > MAX_POSITIVE || draft.negativePrompt.length > MAX_NEGATIVE" @click="saveDraft">{{ editorMode === 'new' ? 'Save style' : 'Save version' }}</v-btn>
+        </v-card-actions>
+      </v-card>
+    </v-dialog>
+
+    <v-dialog v-model="generateDialog" max-width="900" scrollable>
+      <v-card class="dialog-card generation-dialog">
+        <v-card-title>Generate a style</v-card-title>
+        <v-card-subtitle>Describe the sound you need. Styler asks OpenRouter for an original Suno-ready positive and negative prompt.</v-card-subtitle>
+        <v-card-text>
+          <v-textarea v-model="generationRequest" label="What should this style sound like?" rows="4" placeholder="e.g. A volatile midnight dance track that begins intimate and breaks open into catharsis" />
+          <div class="dialog-actions-row"><span class="generation-note">Uses {{ generatedHistory.length ? 'reroll to explore another direction' : 'your configured OpenRouter model' }}.</span><v-spacer /><v-btn color="primary" prepend-icon="mdi-dice-5" :loading="generating" :disabled="!generationRequest.trim()" @click="generateStyle">{{ generatedHistory.length ? 'Reroll' : 'Generate' }}</v-btn></div>
+          <div v-if="generatedHistory.length" class="history-list">
+            <article v-for="(result, index) in generatedHistory" :key="`${result.request}-${index}`" class="generation-result">
+              <div class="generation-result-header"><span>Result {{ generatedHistory.length - index }}</span><v-btn size="small" variant="tonal" prepend-icon="mdi-arrow-right" @click="useGenerated(result)">Use this</v-btn></div>
+              <div class="generated-block"><span>Positive</span><p>{{ result.positivePrompt }}</p></div>
+              <div class="generated-block negative-block"><span>Negative</span><p>{{ result.negativePrompt }}</p></div>
+            </article>
+          </div>
+        </v-card-text>
+        <v-card-actions><v-btn variant="text" @click="generateDialog = false">Done</v-btn></v-card-actions>
+      </v-card>
+    </v-dialog>
+
+    <v-dialog v-model="modelEditDialog" max-width="900" scrollable>
+      <v-card class="dialog-card generation-dialog">
+        <v-card-title>Refine with model</v-card-title>
+        <v-card-subtitle>Describe the change you need. The current version is preserved until you save a result as a new version.</v-card-subtitle>
+        <v-card-text>
+          <div v-if="activeVersion" class="model-edit-context">
+            <div class="model-edit-context-header">Editing version {{ activeVersion.versionNumber }}</div>
+            <div class="model-edit-context-label">Current positive prompt</div>
+            <p>{{ activeVersion.positivePrompt }}</p>
+            <div class="model-edit-context-label">Current negative prompt</div>
+            <p>{{ activeVersion.negativePrompt || 'No exclusions set.' }}</p>
+          </div>
+          <v-textarea v-model="modelEditInstruction" label="What should change?" rows="4" placeholder="e.g. Make the vocal delivery more urgent, keep the cinematic buildup, and remove any artist references." />
+          <div class="dialog-actions-row">
+            <span class="generation-note">Uses {{ modelEditHistory.length ? 'reroll to explore another revision' : 'the current version as context' }}.</span>
+            <v-spacer />
+            <v-btn color="primary" prepend-icon="mdi-dice-5" :loading="editingWithModel" :disabled="!modelEditInstruction.trim()" @click="editWithModel">{{ modelEditHistory.length ? 'Reroll' : 'Refine' }}</v-btn>
+          </div>
+          <div v-if="modelEditHistory.length" class="history-list">
+            <article v-for="(result, index) in modelEditHistory" :key="`${result.request}-${index}`" class="generation-result">
+              <div class="generation-result-header">
+                <span>Revision {{ modelEditHistory.length - index }}</span>
+                <v-btn size="small" color="primary" variant="tonal" prepend-icon="mdi-content-save-outline" :loading="savingModelEdit" @click="saveModelEdit(result)">Save as version</v-btn>
+              </div>
+              <div class="generated-block"><span>Positive</span><p>{{ result.positivePrompt }}</p></div>
+              <div class="generated-block negative-block"><span>Negative</span><p>{{ result.negativePrompt }}</p></div>
+            </article>
+          </div>
+        </v-card-text>
+        <v-card-actions><v-btn variant="text" :disabled="savingModelEdit" @click="modelEditDialog = false">Cancel</v-btn></v-card-actions>
+      </v-card>
+    </v-dialog>
+
+    <v-snackbar v-model="snackbar" color="surface-bright" location="bottom right">{{ snackbarText }}</v-snackbar>
+    <v-snackbar :model-value="Boolean(error)" color="error" location="bottom right" timeout="6000" @update:model-value="(value) => { if (!value) error = '' }">{{ error }}</v-snackbar>
+  </v-app>
+</template>
+</file>
+
+<file path="src/env.d.ts">
+/// <reference types="vite/client" />
+
+declare module '*.vue' {
+  import type { DefineComponent } from 'vue'
+  const component: DefineComponent<Record<string, never>, Record<string, never>, unknown>
+  export default component
+}
+</file>
+
+<file path="src/main.ts">
+import '@mdi/font/css/materialdesignicons.css'
+import 'vuetify/styles'
+import { createApp } from 'vue'
+import { createVuetify } from 'vuetify'
+import App from './App.vue'
+import './styles.css'
+
+const vuetify = createVuetify({
+  theme: {
+    defaultTheme: 'stylerDark',
+    themes: {
+      stylerDark: {
+        dark: true,
+        colors: {
+          background: '#11111b',
+          surface: '#1a1a29',
+          'surface-bright': '#252538',
+          primary: '#aa8cff',
+          secondary: '#76d6c5',
+          error: '#ff8fa3',
+          success: '#79d5a1',
+        },
+      },
+    },
+  },
+  defaults: {
+    VBtn: { rounded: 'lg', elevation: 0 },
+    VTextField: { variant: 'outlined', density: 'comfortable', color: 'primary' },
+    VTextarea: { variant: 'outlined', density: 'comfortable', color: 'primary', autoGrow: true },
+    VSelect: { variant: 'outlined', density: 'comfortable', color: 'primary' },
+  },
+})
+
+createApp(App).use(vuetify).mount('#app')
+</file>
+
+<file path="src/styles.css">
+@import url('https://fonts.googleapis.com/css2?family=DM+Mono:wght@400;500&family=DM+Sans:opsz,wght@9..40,400;9..40,500;9..40,600;9..40,700&display=swap');
+
+:root {
+  color-scheme: dark;
+  font-family: 'DM Sans', Inter, system-ui, sans-serif;
+  background: oklch(0.16 0.025 285);
+  color: oklch(0.94 0.015 285);
+}
+
+* { box-sizing: border-box; }
+body { margin: 0; min-width: 320px; min-height: 100vh; }
+button, input, textarea { font: inherit; }
+
+.app-shell { min-height: 100vh; background: oklch(0.16 0.025 285); }
+.library-pane {
+  display: flex;
+  flex: 0 0 294px;
+  flex-direction: column;
+  min-height: 100vh;
+  background: oklch(0.18 0.025 285);
+  border-right: 1px solid oklch(0.3 0.025 285 / 0.8);
+  padding: 25px 15px 16px;
+}
+.brand-lockup { display: flex; align-items: center; gap: 11px; padding: 0 9px 26px; }
+.brand-mark {
+  display: grid;
+  width: 35px;
+  height: 35px;
+  place-items: center;
+  border-radius: 11px;
+  color: oklch(0.2 0.035 285);
+  background: oklch(0.75 0.16 300);
+  box-shadow: 0 8px 24px oklch(0.25 0.08 300 / 0.32);
+}
+.brand-name { font-size: 17px; font-weight: 700; letter-spacing: -0.025em; }
+.brand-caption { margin-top: 1px; color: oklch(0.68 0.025 285); font-size: 12px; }
+.library-actions { display: grid; gap: 5px; padding: 0 1px 23px; }
+.library-actions .v-btn { justify-content: flex-start; }
+.library-heading { display: flex; align-items: center; justify-content: space-between; padding: 0 9px 9px; color: oklch(0.69 0.035 285); font-size: 12px; font-weight: 600; }
+.style-count { display: grid; min-width: 20px; height: 20px; padding: 0 6px; place-items: center; border-radius: 20px; background: oklch(0.27 0.025 285); color: oklch(0.77 0.03 285); font-size: 11px; }
+.style-list { display: grid; align-content: start; gap: 3px; min-height: 0; overflow-y: auto; }
+.style-row { width: 100%; border: 0; border-radius: 10px; padding: 10px 11px; cursor: pointer; color: inherit; text-align: left; background: transparent; transition: background 160ms ease-out, color 160ms ease-out; }
+.style-row:hover { background: oklch(0.25 0.026 285); }
+.style-row.active { background: oklch(0.31 0.06 285); color: oklch(0.97 0.01 285); }
+.style-row-name { display: block; overflow: hidden; font-size: 14px; font-weight: 600; text-overflow: ellipsis; white-space: nowrap; }
+.style-row-meta { display: block; margin-top: 3px; color: oklch(0.68 0.03 285); font-size: 11px; }
+.style-row.active .style-row-meta { color: oklch(0.8 0.065 285); }
+.library-empty { padding: 12px 9px; color: oklch(0.62 0.025 285); font-size: 13px; line-height: 1.5; }
+.skeleton { opacity: .38; }
+.library-footer { margin-top: auto; padding: 18px 1px 0; }
+.library-footer .v-btn { color: oklch(0.78 0.1 175); }
+
+.detail-pane { width: min(100%, 1120px); margin: 0 auto; padding: 55px clamp(25px, 5vw, 76px); }
+.detail-header { display: flex; align-items: flex-start; justify-content: space-between; gap: 28px; padding-bottom: 43px; }
+.section-label { color: oklch(0.75 0.13 302); font-size: 12px; font-weight: 700; letter-spacing: .08em; text-transform: uppercase; }
+h1 { margin: 8px 0 8px; color: oklch(0.97 0.01 285); font-size: 31px; font-weight: 650; letter-spacing: -0.035em; line-height: 1.05; text-wrap: balance; }
+.detail-header p, .prompt-heading p { margin: 0; color: oklch(0.68 0.025 285); font-size: 13px; }
+.header-actions { display: flex; align-items: center; gap: 7px; flex-wrap: wrap; justify-content: flex-end; }
+.header-actions .v-input { min-width: 210px; }
+.prompt-section { padding: 26px 0 28px; border-top: 1px solid oklch(0.31 0.025 285 / .85); }
+.prompt-heading { display: flex; align-items: center; justify-content: space-between; gap: 16px; padding-bottom: 14px; }
+.prompt-heading .section-label { color: oklch(0.78 0.085 178); }
+.negative-section .section-label { color: oklch(0.8 0.11 20); }
+.prompt-content { max-width: 77ch; color: oklch(0.89 0.018 285); font-family: 'DM Mono', ui-monospace, monospace; font-size: 14px; line-height: 1.85; white-space: pre-wrap; }
+.negative { color: oklch(0.79 0.035 20); }
+.empty-detail { display: grid; max-width: 520px; min-height: 74vh; align-content: center; justify-items: start; }
+.empty-glyph { display: grid; width: 76px; height: 76px; margin-bottom: 20px; place-items: center; border-radius: 22px; color: oklch(0.76 0.15 300); background: oklch(0.25 0.05 285); }
+.empty-detail h1 { font-size: 33px; }
+.empty-detail p { max-width: 49ch; margin: 3px 0 25px; color: oklch(0.69 0.025 285); font-size: 15px; line-height: 1.6; }
+.empty-actions { display: flex; gap: 9px; flex-wrap: wrap; }
+
+.dialog-card { background: oklch(0.205 0.024 285) !important; }
+.dialog-card .v-card-title { padding: 25px 28px 4px; color: oklch(0.97 0.01 285); font-size: 21px; font-weight: 650; letter-spacing: -.02em; }
+.dialog-card .v-card-subtitle { padding: 0 28px 18px; color: oklch(0.7 0.025 285); line-height: 1.45; white-space: normal; }
+.dialog-card .v-card-text { padding: 8px 28px 17px; }
+.dialog-card .v-card-actions { padding: 12px 20px 18px; }
+.dialog-actions-row { display: flex; align-items: center; margin-top: 14px; }
+.generation-note { color: oklch(0.65 0.025 285); font-size: 12px; }
+.model-edit-context { max-height: 218px; margin-bottom: 18px; overflow: auto; border: 1px solid oklch(0.34 0.035 285); border-radius: 11px; padding: 13px 14px; background: oklch(0.175 0.02 285); }
+.model-edit-context-header { margin-bottom: 10px; color: oklch(0.77 0.1 300); font-size: 12px; font-weight: 700; }
+.model-edit-context-label { margin-top: 9px; color: oklch(0.65 0.03 285); font-size: 11px; font-weight: 700; letter-spacing: .06em; text-transform: uppercase; }
+.model-edit-context p { margin: 4px 0 0; color: oklch(0.81 0.02 285); font-family: 'DM Mono', ui-monospace, monospace; font-size: 11px; line-height: 1.55; white-space: pre-wrap; }
+.history-list { display: grid; gap: 12px; margin-top: 24px; }
+.generation-result { overflow: hidden; border: 1px solid oklch(0.34 0.035 285); border-radius: 13px; background: oklch(0.175 0.02 285); }
+.generation-result-header { display: flex; align-items: center; justify-content: space-between; padding: 10px 12px; border-bottom: 1px solid oklch(0.31 0.025 285); color: oklch(0.72 0.04 285); font-size: 12px; font-weight: 600; }
+.generated-block { padding: 13px 14px 5px; }
+.generated-block span { color: oklch(0.75 0.11 178); font-size: 11px; font-weight: 700; letter-spacing: .06em; text-transform: uppercase; }
+.generated-block p { margin: 6px 0 0; color: oklch(0.87 0.02 285); font-family: 'DM Mono', ui-monospace, monospace; font-size: 12px; line-height: 1.65; }
+.negative-block { padding-bottom: 14px; }
+.negative-block span { color: oklch(0.79 0.1 20); }
+.negative-block p { color: oklch(0.78 0.035 20); }
+
+.v-btn { letter-spacing: 0; text-transform: none; font-weight: 650; }
+.v-field { border-radius: 10px !important; }
+.v-field__input, .v-counter { font-size: 13px; }
+.v-overlay__scrim { opacity: .66 !important; }
+
+@media (max-width: 760px) {
+  .app-shell { display: block; }
+  .library-pane { min-height: auto; padding: 18px 14px 12px; border-right: 0; border-bottom: 1px solid oklch(0.3 0.025 285 / .8); }
+  .brand-lockup { padding-bottom: 15px; }
+  .library-actions { grid-template-columns: 1fr 1fr; padding-bottom: 15px; }
+  .library-actions .v-btn { font-size: 12px; }
+  .library-heading { display: none; }
+  .style-list { display: flex; gap: 6px; padding: 0 1px; overflow-x: auto; }
+  .style-row { flex: 0 0 148px; padding: 9px 10px; border: 1px solid oklch(0.31 0.025 285); }
+  .style-row.active { border-color: oklch(0.58 0.12 285); }
+  .library-empty { min-width: 260px; }
+  .library-footer { display: none; }
+  .detail-pane { padding: 32px 22px 48px; }
+  .detail-header { display: grid; gap: 18px; padding-bottom: 30px; }
+  .header-actions { justify-content: flex-start; }
+  .header-actions .v-input { min-width: min(100%, 230px); }
+  h1, .empty-detail h1 { font-size: 28px; }
+  .prompt-section { padding: 22px 0; }
+  .prompt-content { font-size: 13px; line-height: 1.75; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after { scroll-behavior: auto !important; transition-duration: 1ms !important; animation-duration: 1ms !important; }
+}
+</file>
+
+<file path=".env.example">
+# Copy to .env and add your OpenRouter key to enable generation.
+OPENROUTER_API_KEY=
+# Override only if your OpenRouter account uses a different model slug.
+OPENROUTER_MODEL=deepseek/deepseek-v4-pro
+# Optional headers for OpenRouter analytics.
+OPENROUTER_SITE_URL=http://localhost:5173
+OPENROUTER_APP_NAME=Styler
+PORT=5174
+</file>
+
+<file path=".gitignore">
+node_modules/
+dist/
+data/
+.env
+.env.local
+*.tsbuildinfo
+</file>
+
+<file path=".repomixignore">
+# Add patterns to ignore here, one per line
+# Example:
+# *.log
+# tmp/
+.pi/
+dist/
+node_modules/
+data/
+</file>
+
+<file path="AGENTS.md">
+# Repository Guidelines
+
+## Project Overview
+
+Styler is a local Suno style-prompt library. It stores named positive/negative prompts in SQLite, preserves immutable prompt versions, imports combined prompts, and uses OpenRouter for generation and model-assisted refinement.
+
+## Architecture & Data Flow
+
+- **Frontend:** `src/App.vue` is the single Vue 3/Vuetify screen. It owns local UI state, dialogs, form drafts, generated-result histories, and all API calls.
+- **Backend:** `server/index.ts` is a single Express service. It initializes SQLite, exposes JSON APIs, calls OpenRouter, and serves `dist/` for production.
+- **Persistence:** SQLite lives at `data/styler.db` (ignored). `styles` tracks the active version and soft-delete timestamp; `style_versions` holds immutable positive/negative prompt snapshots and metadata.
+- **Request flow:** Vue calls `/api/*` through the Vite proxy in development. Mutations return a style summary; the UI reloads the list and selects that style. Creating an edit always calls `POST /api/styles/:id/versions`, rather than updating an old version.
+- **Model flow:** `/api/generate` creates prompts; `/api/edit-style` receives the current prompts plus an edit instruction. Both share the Suno-specific generation guidance and parse exact `STYLE PROMPT:` / `NEGATIVE PROMPT:` output.
+
+## Key Directories
+
+- `src/` — Vue application entry, screen, ambient types, and styling.
+- `server/` — Express API, SQLite initialization/schema, OpenRouter integration, server TypeScript config.
+- `data/` — runtime SQLite files; never commit or treat as source migrations.
+- `dist/` — generated Vite output; never edit manually.
+
+## Development Commands
+
+```bash
+cp .env.example .env    # configure OPENROUTER_API_KEY for generation/refinement
+pnpm dev                # Vite client + watched Express server
+pnpm dev:client         # Vite only
+pnpm dev:server         # API only
+pnpm build              # Vue typecheck, Vite build, server typecheck
+pnpm start              # run Express server
+pnpm preview            # preview Vite build
+```
+
+There are no configured test, lint, or formatter commands.
+
+## Code Conventions & Common Patterns
+
+- Use strict TypeScript. Frontend is Vue `<script setup lang="ts">`; backend is ESM NodeNext TypeScript.
+- Keep the current lightweight architecture: state lives in `src/App.vue` via `ref`, `computed`, and `onMounted`; do not introduce a store, API layer, or component hierarchy without a concrete need.
+- Name functions and refs in `camelCase`, local types in `PascalCase`, and size limits/constants as `MAX_*`.
+- Reuse `api<T>()` in `src/App.vue` for JSON requests. It expects `{ error: string }` failures and callers should use the existing `try`/`catch`/`finally` pattern: clear `error`, set an operation flag, show a specific fallback, reset the flag in `finally`.
+- For successful mutations, follow the existing pattern: refresh the style list, select the returned style, then call `tell()` for snackbar feedback.
+- Validate at both layers. Server helpers trim and enforce name/prompt lengths; UI mirrors the 120-character name and 1000-character positive/negative limits.
+- Versions are append-only. Preserve existing versions; save modifications as a new version and mark model edits with `source: 'model-edit'` metadata.
+- Soft delete styles by setting `deleted_at`; do not delete versions or database records directly.
+- Keep OpenRouter calls server-side. Reuse `requestStylePrompts()` and `STYLE_PROMPT_GUIDANCE`; preserve its output format, timeout, copyright/artist/voice restrictions, and prompt-length validation.
+- Keep UI styling in `src/styles.css`: use existing Vuetify controls, dark OKLCH token-like values, DM Sans for UI text, DM Mono for prompt content, responsive behavior at `760px`, and reduced-motion support.
+
+## Important Files
+
+- `src/App.vue` — UI state, REST client, all style/import/version/generation/refinement workflows.
+- `src/main.ts` — Vuetify initialization, dark `stylerDark` theme, Material Design Icons.
+- `src/styles.css` — global layout and responsive visual rules.
+- `server/index.ts` — schema, CRUD/version transactions, API routes, model prompting, static serving.
+- `vite.config.ts` — Vue/Vuetify plugins and `/api` proxy to port `5174`.
+- `.env.example` — OpenRouter and server-port configuration.
+- `suno-prompting.md` — source guidance for creating or modifying Suno style prompts; use its style-prompt rules, not its unrelated lyric workflows, when adjusting model instructions.
+
+## Runtime/Tooling Preferences
+
+- Use **pnpm 11.13.1** (`package.json` pins the package manager).
+- This is an ESM project (`"type": "module"`). Use Node-compatible ESM imports and explicit NodeNext conventions in `server/`.
+- The repository does not declare a Node version. Vite’s resolved dependency requires Node `20.19+` or `22.12+`; use a current supported Node release.
+- `pnpm-workspace.yaml` explicitly permits native build scripts for `better-sqlite3` and `esbuild`. Do not bypass that build policy.
+- Keep secrets in `.env`; never expose `OPENROUTER_API_KEY` to the browser or commit `.env` files.
+
+## Testing & QA
+
+- No test framework, test files, coverage target, linter, or formatter is configured.
+- For every permanent behavior change, run `pnpm build`.
+- For UI changes, run the dev app and exercise the changed dialog/workflow in the browser: verify visible state, disabled/loading/error states, and the persisted result.
+- For API/data changes, exercise the relevant endpoint or UI path against a local SQLite database. Do not leave throwaway data in the user’s library.
+</file>
+
+<file path="index.html">
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="theme-color" content="#151522" />
+    <title>Styler — Prompt library</title>
+  </head>
+  <body>
+    <div id="app"></div>
+    <script type="module" src="/src/main.ts"></script>
+  </body>
+</html>
+</file>
+
+<file path="MIGRATION_DESIGN.md">
+# Styler Feature Migration Design
+
+## Purpose
+
+This document describes the portable product behavior and data contract of Styler: a local library for reusable Suno style prompts. It is intended to move these capabilities into another application without preserving the current Vue/Express implementation.
+
+Existing-library migration is desirable but not a release blocker. The model is deliberately small: a style has append-only prompt versions, one of which is current.
+
+## Scope
+
+### In scope
+
+- A named library of reusable music-style prompt pairs.
+- Separate **positive** (style) and **negative** (exclude) prompts.
+- Immutable version history and current-version selection.
+- Manual entry, combined-prompt import, model generation, and model-assisted refinement.
+- Copying either prompt to the clipboard.
+- Soft deletion.
+- Server-side model integration and prompt-safety rules.
+
+### Out of scope
+
+- Lyrics, audio, Suno account integration, Suno generation submission, playback, sharing, collaboration, tags, folders, search, authentication, and recovery/trash UI.
+- A requirement to preserve the existing Vue, Vuetify, Express, SQLite, or OpenRouter-specific interfaces.
+
+## Product behavior
+
+### Library and detail views
+
+The library shows non-deleted styles ordered by most recently updated, newest record first for ties. Each row exposes:
+
+- style name;
+- current version number; and
+- last style update time.
+
+Opening a style shows its name, current prompt pair, source metadata, timestamp, and a version selector. Selecting a historical version changes only the prompt pair being viewed; it does not change the stored current version.
+
+An empty library must guide the user to create, import, or generate a style. Loading, request failure, success feedback, and disabled/loading submit states are part of the expected interaction behavior.
+
+### Manual creation and editing
+
+A user creates a style with a required name and required positive prompt. The negative prompt is optional.
+
+Editing is never in-place. Editing any historical or current version creates the next version for that style, updates the style name supplied by the edit, makes the new version current, and preserves every prior version unchanged.
+
+### Combined-prompt import
+
+Import accepts a comma-separated combined prompt. Each non-empty comma-delimited term whose first non-whitespace character is a dash (`-`, `‐`, `‑`, `‒`, `–`, or `—`) becomes a negative exclusion after removing that dash and prefixing `no `.
+
+All remaining terms form the positive prompt. Both prompt fields remain editable before save. If the user did not supply a name, default it to the first positive term truncated to 60 characters. Saved imports create a new style with source `import`.
+
+Example:
+
+```text
+Input: dark synth-pop, breathy alto, - trap drums, - harsh highs
+Positive: dark synth-pop, breathy alto
+Negative: no trap drums, no harsh highs
+```
+
+### Model generation
+
+The user provides a free-form sound request. The service returns a separately labeled positive and negative prompt pair. Results are ephemeral until the user chooses one; rerolls remain available in the current dialog/session history and do not alter saved data. Choosing a generated result opens normal creation with source `generated`.
+
+### Model refinement
+
+The user selects any saved version and provides an edit instruction. The service receives that selected version's prompt pair plus the instruction, then returns one or more ephemeral candidate pairs. Saving a candidate appends a version to the selected style with source `model-edit` and metadata containing the edit instruction.
+
+The original version remains unchanged until the user explicitly saves a candidate.
+
+### Deletion
+
+Deletion hides a style from normal reads by marking it deleted. It must not delete the style or any prompt versions. The present product has no restore UI, but retaining the record supports a future restore or audit operation.
+
+## Domain model
+
+### Entities
+
+```text
+Style
+├── id
+├── name
+├── currentVersionId ─────────────┐
+├── createdAt                     │
+├── updatedAt                     │
+└── deletedAt?                    │
+                                 │
+StyleVersion                      │
+├── id ◄──────────────────────────┘
+├── styleId ──────────────────────► Style.id
+├── versionNumber                 (unique within one style)
+├── positivePrompt
+├── negativePrompt
+├── metadata                      (extensible JSON object)
+└── createdAt
+```
+
+### Logical schema
+
+The following relational model matches the existing semantics. Another application's persistence system may represent the same fields differently.
+
+```sql
+CREATE TABLE styles (
+  id                  INTEGER PRIMARY KEY,
+  name                TEXT NOT NULL,
+  current_version_id  INTEGER,
+  created_at          TEXT NOT NULL,
+  updated_at          TEXT NOT NULL,
+  deleted_at          TEXT
+);
+
+CREATE TABLE style_versions (
+  id                INTEGER PRIMARY KEY,
+  style_id          INTEGER NOT NULL REFERENCES styles(id),
+  version_number    INTEGER NOT NULL,
+  positive_prompt   TEXT NOT NULL,
+  negative_prompt   TEXT NOT NULL,
+  metadata_json     TEXT NOT NULL DEFAULT '{}',
+  created_at        TEXT NOT NULL,
+  UNIQUE (style_id, version_number)
+);
+```
+
+Recommended indexes:
+
+```sql
+CREATE INDEX styles_active_updated_idx
+  ON styles (deleted_at, updated_at DESC);
+CREATE INDEX style_versions_style_idx
+  ON style_versions (style_id, version_number DESC);
+```
+
+### Invariants
+
+1. A visible style has `deletedAt = null` and a valid `currentVersionId` referencing one of its own versions.
+2. Each newly created style has version number `1`, which is immediately current.
+3. Version numbers are monotonically increasing per style and are never reused.
+4. Prompt versions are immutable. No update or delete path may alter existing prompt content or metadata.
+5. Appending a version updates `Style.name`, `currentVersionId`, and `updatedAt` atomically.
+6. Soft deletion only sets `deletedAt` and updates `updatedAt`; it does not affect versions.
+7. A style detail response includes all versions in descending version-number order. The list response includes only the current version.
+
+Transactions are required for initial creation and version append so readers cannot observe a style without its current version or a partially applied version change.
+
+### Metadata
+
+`metadata` is an extensible object persisted as JSON. `source` is always present and defaults to `manual`.
+
+Current source values:
+
+| Source | Meaning | Additional metadata |
+| --- | --- | --- |
+| `manual` | User typed a new style or manually edited a version. | None required. |
+| `import` | Created from a combined prompt import. | None required. |
+| `generated` | Created from an accepted generation candidate. | None required. |
+| `model-edit` | Saved model-refinement candidate. | `instruction`: submitted edit request. |
+
+The destination application should preserve unknown metadata keys during migration and writes. It should not make UI behavior depend on metadata JSON parsing succeeding; an unreadable or legacy value should display as `manual`.
+
+## Validation and limits
+
+Apply validation in the client for fast feedback and authoritatively on the server or trusted backend boundary.
+
+| Field | Required | Normalization | Maximum |
+| --- | --- | --- | --- |
+| Style name | Yes | Trim whitespace. | 120 characters |
+| Positive prompt | Yes | Trim whitespace. | 1,000 characters |
+| Negative prompt | No | Trim whitespace; use empty string when absent. | 1,000 characters |
+| Generation request | Yes | Trim whitespace. | 2,000 characters |
+| Refinement instruction | Yes | Trim whitespace. | 2,000 characters |
+
+The model guidance recommends positive prompts of 250–700 characters but only enforces the 1,000-character ceiling. Negative prompts should usually contain 3–10 concise exclusions.
+
+## Service contract
+
+The current HTTP API is a reference contract, not a mandate for the destination application's transport. Responses use camelCase; timestamps are SQLite `CURRENT_TIMESTAMP` strings (UTC).
+
+| Operation | Reference endpoint | Request | Result |
+| --- | --- | --- | --- |
+| Health check | `GET /api/health` | — | `{ ok: true }` |
+| List active styles | `GET /api/styles` | — | Current-version style summaries, ordered by update time descending. |
+| Get style history | `GET /api/styles/:id` | — | Summary plus `versions` in version-number descending order. |
+| Create style | `POST /api/styles` | `StyleInput` | Created current summary, HTTP 201. |
+| Append version | `POST /api/styles/:id/versions` | `StyleInput` | New current summary, HTTP 201. |
+| Soft-delete style | `DELETE /api/styles/:id` | — | HTTP 204. |
+| Generate candidates | `POST /api/generate` | `{ request }` | `{ positivePrompt, negativePrompt }` |
+| Refine candidate | `POST /api/edit-style` | `{ instruction, positivePrompt, negativePrompt }` | `{ positivePrompt, negativePrompt }` |
+
+`StyleInput`:
+
+```ts
+type StyleInput = {
+  name: string
+  positivePrompt: string
+  negativePrompt?: string
+  source?: 'manual' | 'import' | 'generated' | 'model-edit' | string
+  metadata?: Record<string, unknown>
+}
+```
+
+A summary contains the style fields plus its current version fields:
+
+```ts
+type StyleSummary = {
+  id: number
+  name: string
+  currentVersionId: number
+  createdAt: string
+  updatedAt: string
+  versionNumber: number
+  positivePrompt: string
+  negativePrompt: string
+  metadataJson: string
+  versionCreatedAt: string
+}
+
+type StyleVersion = {
+  id: number
+  versionNumber: number
+  positivePrompt: string
+  negativePrompt: string
+  metadataJson: string
+  createdAt: string
+}
+
+type StyleDetail = StyleSummary & { versions: StyleVersion[] }
+```
+
+Expected errors are JSON objects in the form `{ "error": string }`: invalid input and model response errors are client errors; a missing or deleted style is a 404. The destination should preserve user-actionable error text but may use its own error envelope.
+
+## Model integration
+
+### Trust boundary
+
+Model calls run only in a server-side environment. Never expose an OpenRouter API key or equivalent provider credential to the browser/client.
+
+The current provider is OpenRouter's chat-completions API. Configuration is:
+
+```text
+OPENROUTER_API_KEY        required
+OPENROUTER_MODEL          optional; default deepseek/deepseek-v4-pro
+OPENROUTER_SITE_URL       optional HTTP-Referer
+OPENROUTER_APP_NAME       optional X-Title
+```
+
+The existing integration uses a 45-second request timeout, model temperature `0.9`, and requires exactly these two labeled fields with no commentary:
+
+```text
+STYLE PROMPT: <positive prompt>
+NEGATIVE PROMPT: <negative prompt>
+```
+
+Parse the labels case-insensitively, trim surrounding code fences, reject missing labels, and reject either output if it is empty or exceeds 1,000 characters. Do not persist a generated or refined candidate automatically.
+
+### Prompt policy
+
+Both generation and refinement must preserve these rules:
+
+- Create original Suno v5.5-oriented prompts.
+- Keep positive and negative prompts separate.
+- Do not include artists, bands, songs, albums, copyrighted lyrics, voice imitation, or `in the style of` phrasing.
+- Convert referenced artists or works into neutral traits such as era, genre, mood, instrumentation, vocal delivery, arrangement, and production.
+- Front-load genre and mood, then cover vocal delivery, instrumentation, tempo/key, arrangement, production, and mix.
+- Keep positive prompts concise, natural, non-contradictory, and within the limit.
+- Keep negatives concise and specific exclusions.
+
+Refinement additionally receives the selected current-or-historical prompt pair and must preserve compatible useful direction while applying the user's request. If the old prompt or instruction contains a prohibited reference, the response removes it and substitutes neutral traits without commenting on the removal.
+
+## Migration strategy
+
+### Priority and compatibility posture
+
+Data migration is optional for initial feature delivery. The destination should ship the library feature with the domain invariants above even if importing old data is deferred. No cross-application live synchronization is required.
+
+When migration is implemented, prefer a one-time, idempotent import that preserves old identifiers and version history where practical. Treat the source database as read-only and take a consistent SQLite backup before processing.
+
+### Source extraction
+
+The source is a SQLite database at `data/styler.db`, with foreign keys enabled and WAL mode. Copy the database safely using SQLite backup tooling or by copying a checkpointed database; do not copy only the main database file while uncheckpointed WAL data exists.
+
+Extract all rows from `styles` and `style_versions`, including soft-deleted styles. Import order is:
+
+1. create styles with original IDs or retain a stable `legacyStyleId` mapping;
+2. create every version with its original version number and timestamp;
+3. resolve each style's current version from `current_version_id`;
+4. copy `created_at`, `updated_at`, and `deleted_at` when the target can store them;
+5. verify counts and relational integrity before marking the import complete.
+
+### Field mapping
+
+| Source field | Destination meaning | Notes |
+| --- | --- | --- |
+| `styles.id` | style ID or legacy external ID | Preserve when no collision risk. |
+| `styles.name` | style name | Preserve verbatim; only normalize if target requires it. |
+| `styles.current_version_id` | current version reference | Must reference an imported version of the same style. |
+| `styles.created_at`, `updated_at`, `deleted_at` | lifecycle timestamps | Preserve as UTC values where possible. |
+| `style_versions.id` | version ID or legacy external ID | Preserve when feasible. |
+| `style_versions.style_id` | style reference | Resolve through the imported style map. |
+| `style_versions.version_number` | version sequence | Preserve exactly. |
+| `positive_prompt`, `negative_prompt` | prompt pair | Preserve exactly; do not regenerate. |
+| `metadata_json` | version metadata | Parse and preserve unknown keys; retain raw JSON or record an import warning if malformed. |
+| `style_versions.created_at` | version creation time | Preserve where possible. |
+
+### Migration validation
+
+For every imported style, verify:
+
+- the destination has the same number of styles and versions as the source, including deleted styles;
+- each source style maps to exactly one destination style;
+- every destination current version belongs to its style and equals the source's current version mapping;
+- version numbers, prompt strings, timestamps, deletion state, and metadata survive unchanged;
+- active-list ordering matches source ordering when timestamps are preserved.
+
+A malformed metadata JSON value should not abort the entire import: preserve its raw value if supported, otherwise import the prompts and record the affected source version ID for review. Missing current-version references or orphan versions are integrity failures and should stop migration rather than silently choosing a replacement.
+
+### Cutover
+
+1. Stop writes to the source app or accept that the import is a point-in-time snapshot.
+2. Create and retain a source backup.
+3. Run the import in a transaction or an import namespace that can be discarded on failure.
+4. Run migration validation and inspect a small sample in the destination UI.
+5. Enable the new feature after validation. Keep the backup until the destination's normal retention period permits deletion.
+
+## Implementation dependencies
+
+The feature needs:
+
+- persistent storage with transactions and foreign-key-equivalent integrity;
+- a trusted backend or server action layer for validation and model calls;
+- a model provider credential store;
+- client clipboard access for copy actions; and
+- a UI state model for selection, draft dialogs, asynchronous operations, transient candidate histories, feedback, and errors.
+
+The feature does not require the current presentation layer. The source app uses Vue 3, Vuetify, Express 5, better-sqlite3, and OpenRouter, but those are implementation choices rather than domain requirements.
+
+## Acceptance checklist
+
+- [ ] Users can create a named prompt pair with an optional negative prompt.
+- [ ] A style edit creates a new immutable version and changes the active current version atomically.
+- [ ] Users can inspect and select historical versions without mutating current-version state.
+- [ ] Combined import splits dash-prefixed comma terms into `no …` exclusions and permits review before saving.
+- [ ] Generation and refinement candidates remain unsaved until explicit user action.
+- [ ] Model requests are server-side, enforce the required labeled output, and apply the original-content restrictions.
+- [ ] Deleting a style is reversible at the data level because it is soft deletion.
+- [ ] Input limits are enforced at the trusted boundary.
+- [ ] If migration is enabled, imported style/version counts, version links, prompt content, metadata, and deletion state are verified.
+</file>
+
+<file path="package.json">
+{
+  "name": "styler",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "concurrently -k \"vite\" \"tsx watch server/index.ts\"",
+    "dev:client": "vite",
+    "dev:server": "tsx watch server/index.ts",
+    "build": "vue-tsc -b && vite build && tsc -p server/tsconfig.json",
+    "start": "tsx server/index.ts",
+    "preview": "vite preview"
+  },
+  "dependencies": {
+    "@mdi/font": "^7.4.47",
+    "better-sqlite3": "^12.6.2",
+    "dotenv": "^17.2.3",
+    "express": "^5.2.1",
+    "vue": "^3.5.24",
+    "vuetify": "^3.10.4"
+  },
+  "devDependencies": {
+    "@types/better-sqlite3": "^7.6.13",
+    "@types/express": "^5.0.5",
+    "@types/node": "^24.10.1",
+    "@vitejs/plugin-vue": "^6.0.1",
+    "concurrently": "^9.2.1",
+    "tsx": "^4.20.6",
+    "typescript": "^5.9.3",
+    "vite": "^7.2.2",
+    "vite-plugin-vuetify": "^2.1.3",
+    "vue-tsc": "^3.1.5"
+  },
+  "packageManager": "pnpm@11.13.1"
+}
+</file>
+
+<file path="pnpm-workspace.yaml">
+allowBuilds:
+  better-sqlite3: true
+  esbuild: true
+</file>
+
+<file path="repomix.config.json">
+{
+  "input": {
+    "maxFileSize": 52428800
+  },
+  "output": {
+    "filePath": "repomix-output.xml",
+    "style": "xml",
+    "parsableStyle": false,
+    "fileSummary": true,
+    "directoryStructure": true,
+    "files": true,
+    "removeComments": false,
+    "removeEmptyLines": false,
+    "compress": false,
+    "topFilesLength": 5,
+    "showLineNumbers": false,
+    "copyToClipboard": false,
+    "git": {
+      "sortByChanges": true,
+      "sortByChangesMaxCommits": 100,
+      "includeDiffs": false
+    }
+  },
+  "include": [],
+  "ignore": {
+    "useGitignore": true,
+    "useDefaultPatterns": true,
+    "customPatterns": []
+  },
+  "security": {
+    "enableSecurityCheck": true
+  },
+  "tokenCount": {
+    "encoding": "o200k_base"
+  }
+}
+</file>
+
+<file path="suno-prompting.md">
+Skill: StylePrompt
+V2.0 for Suno 5.5 and up
+
+Invoke this only when asked to create, or modify a style prompt.
+
+This guide provides detailed instructions for an LLM assistant to help users create music with Suno.ai, updated for Suno v5.5. It focuses on stylistic choices, prompt construction, lyric structure, personalization features, negative prompts, and safe/original creative direction. The assistant should help users make clear, high-quality Suno prompts while avoiding copyrighted artist/band references, copyrighted lyrics, and unauthorized voice/style imitation.
+
+Introduction to Suno.ai and v5.5
+
+Suno.ai is a generative AI music platform that creates songs from text prompts, lyrics, style descriptions, uploaded audio, and personalization tools. Suno v5.5 builds on the v4.5/v5 prompting workflow but adds stronger personalization and expressiveness.
+
+Key v5.5 capabilities:
+- More expressive and personalized generations.
+- Voices: lets eligible users create songs using their own verified voice instead of a default Suno singer.
+- Custom Models: lets Pro/Premier users tune v5.5 to their own original catalog.
+- My Taste: learns the user’s preferred genres, moods, and creation habits, then influences Style augmentation.
+- Personas have effectively moved into the Voices area; Style Personas remain available inside the Voices menu.
+- Better use of nuanced descriptors for vocals, emotion, performance, arrangement, and production.
+- Continued support for Custom Mode, section tags, Exclude/negative prompting, detailed style prompts, and creative sliders.
+
+Important framing:
+- v5.5 does not require a completely new prompt language.
+- The best results still come from a clear Style Prompt, a separate Negative/Exclude Prompt, and well-structured lyrics.
+- v5.5’s main advantage is personalization: own voice, own model, own taste profile.
+- When using Voices or Custom Models, prompts should become more song-specific instead of over-explaining the user’s identity or sound.
+
+Core Assistant Rules
+
+1. Always use Custom Mode when the user wants control.
+Use Custom Mode for original lyrics, exact style direction, section tags, instrument choices, vocal delivery, arrangement, and negative prompts.
+
+2. Always produce a separate Negative Prompt when producing a Style Prompt.
+The Style Prompt and Negative Prompt must always be in separate blocks.
+
+3. Never use copyrighted band names, artist names, song titles, album names, or “in the style of [artist]” phrasing in Style Prompts.
+If the user references an artist or band, translate the reference into neutral musical traits:
+- era
+- genre/subgenre
+- tempo
+- instrumentation
+- vocal delivery
+- production texture
+- arrangement style
+- emotional tone
+
+Example:
+User says: “Make it like a 90s Radiohead song.”
+
+Assistant should not write “Radiohead.”
+
+Assistant should write something like:
+
+    90s alternative rock, melancholic art-rock atmosphere, angular clean electric guitars, introspective male vocal delivery, dynamic quiet-loud arrangement, atmospheric analog textures, existential mood.
+
+4. Do not reproduce copyrighted lyrics.
+Write original lyrics. If the user asks for a copyrighted song, create a new song with a similar broad mood or theme, without copying lines, melodies, titles, or distinctive phrasing.
+
+5. Do not help users clone or imitate another person’s voice.
+Voices should only be used for the user’s own verified voice or a voice they have explicit rights to use.
+
+6. Front-load the most important musical traits.
+Suno tends to respond best when the most important genre, mood, vocal, and instrumentation details appear early.
+
+Standard Output Format for the Assistant
+
+When helping the user make a Suno song, provide:
+
+1. Short creative direction
+2. Title idea
+3. Style Prompt in a clearly labeled block
+4. Negative Prompt in a separate clearly labeled block
+5. Lyrics in a clearly labeled block, if lyrics are requested
+6. Optional generation notes: Voices, Custom Model, My Taste, sliders, or iteration suggestions
+
+Example structure:
+
+Title: [Song Title]
+
+Style Prompt:
+
+    ...
+
+Negative Prompt:
+
+    ...
+
+Lyrics:
+
+    [Intro]
+    ...
+
+    [Verse 1]
+    ...
+
+    [Chorus]
+    ...
+
+Style Prompt Guidelines for v5.5
+
+Style Prompt max: use 1000 characters as the safe working limit.
+Recommended length: 250–700 characters for most songs.
+Use commas or short natural phrases.
+Be specific, but do not overload the prompt with contradictions.
+
+A strong v5.5 Style Prompt should include:
+
+- Primary genre/subgenre
+- Secondary genre influence, if useful
+- Mood and emotional arc
+- Vocal delivery or Voice usage
+- Instrumentation
+- Tempo/BPM
+- Key or tonal center, if relevant
+- Arrangement shape
+- Production texture
+- Mix/mastering feel
+- Sonic details
+- Ending or transition notes, if important
+
+Recommended order:
+1. Genre and core identity
+2. Mood/energy
+3. Vocal delivery
+4. Instruments
+5. Tempo/key/time signature
+6. Arrangement
+7. Production texture
+8. Mix qualities
+
+Example formula:
+
+    [genre/subgenre], [mood/energy], [vocal delivery], [instruments], [BPM/key], [arrangement arc], [production texture], [mix feel]
+
+Good v5.5 descriptors:
+- intimate close-mic vocal
+- cracked falsetto moments
+- dry lead vocal with subtle plate reverb
+- brushed drums
+- upright bass
+- tape-warmed acoustic guitar
+- wide natural stereo field
+- restrained first verse, explosive final chorus
+- syncopated percussion
+- soft analog pads
+- breathy harmonies
+- raw demo intimacy
+- polished but not over-compressed
+- cinematic low-end bloom
+- evolving ambient textures
+
+Avoid:
+- vague prompts like “good song, emotional, catchy”
+- too many competing genres
+- artist/band names
+- contradictory instructions such as “minimal acoustic folk, huge EDM festival drop”
+- stuffing 20+ unrelated instruments into one prompt
+- putting negatives in the Style Prompt when a separate Exclude/Negative field is available
+
+Negative Prompt / Exclude Guidelines
+
+Always provide a Negative Prompt in a separate block.
+
+Use the Negative Prompt to remove unwanted:
+- genres
+- instruments
+- vocal effects
+- production artifacts
+- arrangement behaviors
+- lyrical clichés
+- mix qualities
+
+Keep it concise. Recommended length: 3–10 exclusions.
+Max: use 1000 characters as the safe working limit, but shorter usually works better.
+
+Good negative prompt examples:
+
+    no trap drums, no EDM drop, no autotune, no distorted guitars, no harsh highs, no over-compressed master
+
+    no rap verse, no choir, no orchestral strings, no dubstep bass, no chipmunk vocals, no robotic phrasing
+
+    no vocals, no singing, no chanting, no spoken word, no vocal samples
+
+For instrumental tracks, use all three controls:
+- Style Prompt says “instrumental”
+- Lyrics box contains “[Instrumental]”
+- Negative Prompt excludes vocals
+
+Example:
+
+Style Prompt:
+
+    instrumental cinematic ambient, slow evolving synth pads, soft piano motifs, distant guitar swells, 72 BPM, minor key, spacious reverb, no lead vocal
+
+Negative Prompt:
+
+    no vocals, no singing, no chanting, no spoken word, no vocal samples, no rap
+
+Lyrics:
+
+    [Instrumental]
+
+Lyrics Guidelines for v5.5
+
+Lyrics max: use 5000 characters as the safe working limit.
+For most songs, shorter and cleaner lyrics perform better than dense blocks of text.
+
+Use section tags wrapped in square brackets:
+- [Intro]
+- [Verse 1]
+- [Pre-Chorus]
+- [Chorus]
+- [Post-Chorus]
+- [Verse 2]
+- [Bridge]
+- [Break]
+- [Instrumental]
+- [Solo]
+- [Build]
+- [Drop]
+- [Final Chorus]
+- [Outro]
+
+General lyric rules:
+- Write singable lines.
+- Avoid overly long lines unless the genre is rap/spoken word.
+- Keep chorus lyrics hooky and repeatable.
+- Use internal rhyme and rhythm for rap/hip-hop.
+- Use concrete imagery for emotional songs.
+- Keep the emotional arc clear.
+- Do not put too many performance cues inside the lyrics box.
+- Use section-level performance cues sparingly.
+
+Useful lyric-section cue examples:
+
+    [Chorus - soaring harmonies, bigger drums]
+
+    [Bridge - stripped down, almost whispered]
+
+    [Final Chorus - full band, octave-up harmony]
+
+Do not overuse bracketed commands. Too many cues can confuse the model.
+
+Genre-Specific Lyric Advice
+
+Pop:
+- Strong chorus hook
+- Repeated title phrase
+- Clear emotional premise
+- Short, memorable lines
+
+Rock:
+- Strong verse imagery
+- Bigger chorus payoff
+- Dynamic contrast
+- Optional bridge or solo section
+
+Folk / Singer-songwriter:
+- Storytelling
+- Natural language
+- Concrete images
+- Subtle rhyme
+
+Country:
+- Conversational storytelling
+- Specific places/objects
+- Clear emotional turn
+- Memorable chorus line
+
+Rap / Hip-hop:
+- Rhythm-first writing
+- Internal rhyme
+- Punchlines or vivid claims
+- Avoid lines that are too syllable-heavy for the BPM
+
+R&B / Soul:
+- Smooth phrasing
+- Melisma-friendly vowels
+- Sensual or emotionally direct language
+- Space for vocal runs
+
+EDM / Dance:
+- Minimal verses
+- Short hook phrases
+- Build/drop structure
+- Repetition that works rhythmically
+
+Metal / Punk:
+- High-energy phrasing
+- Direct emotional language
+- Short aggressive lines
+- Clear chantable hooks
+
+v5.5 Voices Workflow
+
+Use Voices only for the user’s own verified voice or voices they have rights to use.
+
+When a Voice is active:
+- Mention “using selected Voice profile” if helpful.
+- Do not over-specify gender unless the user asks.
+- Focus on delivery: whispered, belted, intimate, raspy, airy, conversational, soulful, urgent.
+- Use vocal-performance tags rather than artist comparisons.
+- If the voice does not sound enough like the user, suggest raising Audio Influence.
+- A clean, quiet, longer voice reference usually gives better results.
+- Acapella voice recordings are best, but Suno can attempt vocal isolation from recordings with background music.
+- Match the voice to a suitable genre, but also encourage controlled experiments.
+
+Voice-ready Style Prompt example:
+
+    using selected Voice profile, intimate acoustic soul ballad, warm close-mic vocal delivery, subtle breath and human phrasing, fingerpicked acoustic guitar, soft Rhodes piano, brushed percussion, 78 BPM, A minor, restrained verses building to a heartfelt final chorus, natural room reverb, warm analog mix
+
+Negative Prompt:
+
+    no autotune, no robotic vocals, no trap hats, no EDM drop, no harsh sibilance, no over-compressed master
+
+v5.5 Custom Models Workflow
+
+Custom Models are best when the user has an original catalog and wants repeatable identity across generations.
+
+When a Custom Model is active:
+- Do not waste prompt space restating everything the model should already know.
+- Focus on the specific song: mood, tempo, lyrical angle, arrangement, instrumentation changes, and production goal.
+- Use prompts to steer the model, not to fight it.
+- If results are too samey, adjust genre blend, tempo, arrangement, or Weirdness.
+- If results drift too far, increase Style Influence and simplify the prompt.
+
+Custom Model prompt example:
+
+    using selected Custom Model, late-night midtempo alt-pop, bittersweet but hopeful, 92 BPM, minor-key verse shifting to brighter chorus, intimate lead vocal with stacked harmonies in the hook, sparse first verse, bass and drums enter in pre-chorus, wide cinematic final chorus, polished warm mix
+
+Negative Prompt:
+
+    no generic radio pop, no trap beat, no EDM riser, no overly bright synths, no vocal chopping, no crowded arrangement
+
+My Taste Workflow
+
+My Taste personalizes Style augmentation based on the user’s creation/listening habits.
+
+When using My Taste:
+- Use the Magic Wand/Style augmentation to expand rough ideas.
+- Review the expanded style prompt before generation.
+- Remove artist names, copyrighted references, or unwanted assumptions.
+- If the user wants something outside their usual taste, explicitly counter-steer the prompt.
+- If the personalized suggestions keep pulling the song in the wrong direction, suggest editing or disabling My Taste.
+
+Prompt Enhancement / Magic Wand Guidance
+
+The assistant may suggest using prompt enhancement when:
+- the user has only a rough idea
+- the style prompt is too sparse
+- the user wants a more polished prompt
+- the user wants unexpected genre blending
+
+However, always audit enhanced prompts:
+- Remove artist/band names
+- Remove contradictory descriptors
+- Remove excessive adjectives
+- Keep the strongest 8–15 descriptors
+- Make sure the prompt still matches the user’s intent
+
+Creative Sliders Guidance
+
+Use sliders as optional generation notes.
+
+Weirdness:
+- Lower: safer, more conventional, cleaner structure
+- Around 50%: normal expected behavior
+- Higher: more experimental, surprising, unstable, or unusual
+
+Style Influence:
+- Lower: looser interpretation, more creative drift
+- Higher: closer adherence to the Style Prompt
+
+Audio Influence:
+- Appears when using audio upload or Voices.
+- Raise when the uploaded audio or selected Voice needs to be followed more strongly.
+- Avoid maxing every influence control at once unless deliberately experimenting.
+
+For first generations:
+- Keep Weirdness near normal.
+- Use medium-high Style Influence for prompt accuracy.
+- Use higher Audio Influence when using Voices or a reference upload.
+
+Long Song Structure
+
+Suno can support longer song structures, but the assistant should plan them intentionally.
+
+For songs over 4 minutes:
+- Use clear sections.
+- Do not write endless verses.
+- Repeat chorus with variation.
+- Include instrumental breaks, bridges, or solos.
+- Add arrangement cues that evolve over time.
+- Keep lyrical themes coherent.
+
+Long structure example:
+
+    [Intro]
+    [Verse 1]
+    [Pre-Chorus]
+    [Chorus]
+    [Verse 2]
+    [Pre-Chorus]
+    [Chorus]
+    [Instrumental Break]
+    [Bridge]
+    [Final Chorus]
+    [Outro]
+
+Quality Checklist Before Finalizing a Prompt
+
+Before giving the user a Suno prompt, verify:
+
+- Style Prompt is under 1000 characters.
+- Negative Prompt is separate and concise.
+- No copyrighted band, artist, song, or album names appear.
+- No unauthorized voice imitation is requested.
+- Genre, mood, instruments, vocal delivery, tempo, and production are clear.
+- Critical style details appear early.
+- Lyrics use section tags in square brackets.
+- Chorus has a strong hook.
+- The negative prompt does not accidentally exclude something desired.
+- Voice/Custom Model/My Taste notes are included when relevant.
+- The prompt is not overloaded with conflicting instructions.
+
+Sample Style Prompt
+
+    indie folk with ambient chamber-pop textures, nostalgic and intimate, warm close-mic vocal delivery with soft harmonies, fingerpicked acoustic guitar, brushed drums, upright bass, felt piano, subtle analog pads, 84 BPM, D major, gentle verse-to-chorus lift, tape warmth, natural room reverb, wide organic mix, human timing, soft outro fade
+
+Sample Negative Prompt
+
+    no trap drums, no EDM drop, no distorted guitars, no autotune, no choir, no harsh highs, no over-compressed radio mix
+
+Sample Lyrics
+
+    [Intro]
+    Soft guitar, room tone, distant pad
+
+    [Verse 1]
+    I left the porch light burning low
+    For every version I outgrew
+    The street was quiet, wind was cold
+    But I could hear the morning move
+
+    [Pre-Chorus]
+    And all the names I used to be
+    Were folding up like paper boats
+
+    [Chorus]
+    I’m coming back as someone new
+    Still carrying the rain I knew
+    But every scar is letting light come through
+    I’m coming back as someone new
+
+    [Verse 2]
+    The old road bends behind the trees
+    The mile signs rust, the windows glow
+    I thought the past was chasing me
+    But it was only letting go
+
+    [Bridge - stripped down, almost whispered]
+    If I forgive the nights I lost
+    Maybe the dawn can find me too
+
+    [Final Chorus - full harmonies, bigger drums]
+    I’m coming back as someone new
+    Still carrying the rain I knew
+    But every scar is letting light come through
+    I’m coming back as someone new
+
+    [Outro]
+    Soft guitar and fading harmonies
+
+Assistant Behavior Examples
+
+If the user says:
+“Make a song like Taylor Swift but darker.”
+
+Do not use the artist name in the Style Prompt.
+Respond with:
+“Got it — I’ll translate that into neutral musical traits: confessional pop songwriting, sharp emotional detail, polished modern production, darker minor-key atmosphere.”
+
+Style Prompt:
+
+    dark confessional pop, minor-key emotional storytelling, intimate lead vocal, polished modern drums, pulsing synth bass, muted electric guitar textures, cinematic pads, 96 BPM, restrained verses building to a cathartic hook, bittersweet mood, crisp radio-ready mix with shadowy atmosphere
+
+Negative Prompt:
+
+    no artist imitation, no country twang, no EDM drop, no trap hi-hats, no bright bubblegum pop, no childish lyrics
+
+If the user says:
+“Use my voice and make it a soul track.”
+
+Respond with:
+“Use your verified Suno Voice profile, then keep the prompt focused on delivery and arrangement.”
+
+Style Prompt:
+
+    using selected Voice profile, warm modern soul, intimate close-mic vocal, expressive phrasing with gentle runs, Rhodes piano, clean electric guitar, live bass, brushed drums, 76 BPM, B minor, spacious verses, lush harmony stack in chorus, vintage tape warmth, natural reverb, smooth dynamic mix
+
+Negative Prompt:
+
+    no autotune, no robotic vocals, no trap beat, no EDM synths, no harsh highs, no over-singing
+
+Final Principle
+
+For Suno v5.5, the assistant’s job is not just to write “a prompt.” The assistant should design a controlled generation plan:
+- positive style direction
+- negative/exclude direction
+- clean lyric structure
+- safe originality
+- personalization notes for Voices, Custom Models, and My Taste
+- iteration advice after the first generation
+
+The best v5.5 prompts are specific, original, emotionally clear, and personalized without relying on copyrighted artist names or unauthorized voice/style imitation.
+</file>
+
+<file path="tsconfig.app.json">
+{
+  "include": ["src/**/*.ts", "src/**/*.tsx", "src/**/*.vue"],
+  "exclude": ["src/**/__tests__/*"],
+  "compilerOptions": {
+    "target": "ES2022",
+    "module": "ESNext",
+    "moduleResolution": "Bundler",
+    "lib": ["ES2022", "DOM", "DOM.Iterable"],
+    "tsBuildInfoFile": "./node_modules/.tmp/tsconfig.app.tsbuildinfo",
+    "composite": true,
+    "noEmit": true,
+    "strict": true,
+    "verbatimModuleSyntax": true,
+    "isolatedModules": true,
+    "moduleDetection": "force",
+    "skipLibCheck": true
+  }
+}
+</file>
+
+<file path="tsconfig.json">
+{
+  "files": [],
+  "references": [
+    { "path": "./tsconfig.app.json" },
+    { "path": "./tsconfig.node.json" }
+  ]
+}
+</file>
+
+<file path="tsconfig.node.json">
+{
+  "compilerOptions": {
+    "target": "ES2022",
+    "module": "ESNext",
+    "moduleResolution": "Bundler",
+    "composite": true,
+    "noEmit": true,
+    "strict": true,
+    "skipLibCheck": true
+  },
+  "include": ["vite.config.ts"]
+}
+</file>
+
+<file path="vite.config.ts">
+import { defineConfig } from 'vite'
+import vue from '@vitejs/plugin-vue'
+import vuetify from 'vite-plugin-vuetify'
+
+export default defineConfig({
+  plugins: [vue(), vuetify({ autoImport: true })],
+  server: {
+    proxy: {
+      '/api': 'http://localhost:5174',
+    },
+  },
+})
+</file>
+
+</files>
