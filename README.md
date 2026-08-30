@@ -7,12 +7,21 @@ Self-hosted lyrics editor built with Nuxt 4, Vue 3, Pinia, CodeMirror, PostgreSQ
 ```sh
 pnpm install
 cp .env.example .env
-docker compose up -d db
-pnpm db:migrate
+docker compose up --build
+
+# Apply schema once the stack is healthy.
+docker compose exec app pnpm db:migrate
+```
+
+Compose starts PostgreSQL and the Nuxt development server. Open `http://localhost:3000` exactly; the Google callback URL and the browser origin must both be `http://localhost:3000/auth/google` in local development. Do not use `127.0.0.1`, a LAN address, or a production process configuration for the same OAuth client.
+
+The Nuxt application runs in development mode inside Compose; PostgreSQL is exposed on the host for database tools.
+
+```sh
 pnpm dev
 ```
 
-The Nuxt application runs locally; PostgreSQL is the only local daemon and runs in Docker Compose.
+The last command remains available when running the application outside Compose.
 
 ## Database
 
@@ -55,7 +64,7 @@ The importer preserves timestamps, archive status, labels, lyrics, and friendly 
 
 ## Production
 
-Set the production variables from `.env.example`, configure Google with `https://ritual.example.com/auth/google`, and put nginx in front of the Node server. A proxy example is in `deploy/nginx.conf.example`.
+Set the production variables from `.env.example`, configure Google with `https://ritual.example.com/auth/google`, and put nginx in front of the Node server. A proxy example is in `deploy/nginx.conf.example`. Do not open the production Node port over HTTP: `nuxt-auth-utils` sets the temporary OAuth state cookie to `Secure` in production, so a plaintext callback cannot return it and will fail with `state mismatch`.
 
 ```sh
 pnpm install --frozen-lockfile
