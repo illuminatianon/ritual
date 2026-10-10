@@ -5,5 +5,6 @@
     <section class="workbench-workspace"><slot name="workspace" /></section>
     <slot name="secondary" />
     <slot name="status" />
+    <slot />
   </main>
 </template>

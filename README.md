@@ -60,6 +60,13 @@ pnpm import:sqlite -- --source /path/to/ritual.sqlite --user user@example.com --
 pnpm import:sqlite -- --source /path/to/ritual.sqlite --user user@example.com
 ```
 
+To import a Styler backup into an explicit Ritual account, use the idempotent Style importer:
+
+```sh
+pnpm import:styler -- --source /path/to/styler.db --user-id <ritual-user-uuid> --dry-run
+pnpm import:styler -- --source /path/to/styler.db --user-id <ritual-user-uuid>
+```
+
 The importer preserves timestamps, archive status, labels, lyrics, and friendly version numbers. It refuses a target account that already owns songs unless `--force` is explicit.
 
 ## Production
